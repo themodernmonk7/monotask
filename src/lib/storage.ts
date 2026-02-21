@@ -3,6 +3,8 @@ import type { CompletedTask, Note, Group } from "../types"
 const COMPLETED_KEY = "monotask-completed"
 const NOTES_KEY = "monotask-notes"
 const GROUPS_KEY = "monotask-groups"
+const RUNNING_TASK_ID_KEY = "monotask-running-task-id"
+const LAST_ACTIVE_KEY = "monotask-last-active"
 
 export function getCompletedTasks(): CompletedTask[] {
   try {
@@ -45,4 +47,29 @@ export function getGroupsFromStorage(): Group[] {
 
 export function setGroupsToStorage(groups: Group[]): void {
   localStorage.setItem(GROUPS_KEY, JSON.stringify(groups))
+}
+
+export function getRunningTaskId(): string | null {
+  return localStorage.getItem(RUNNING_TASK_ID_KEY)
+}
+
+export function setRunningTaskId(id: string | null): void {
+  if (id) {
+    localStorage.setItem(RUNNING_TASK_ID_KEY, id)
+  } else {
+    localStorage.removeItem(RUNNING_TASK_ID_KEY)
+  }
+}
+
+export function getLastActiveTimestamp(): number | null {
+  const val = localStorage.getItem(LAST_ACTIVE_KEY)
+  return val ? parseInt(val, 10) : null
+}
+
+export function setLastActiveTimestamp(ts: number | null): void {
+  if (ts) {
+    localStorage.setItem(LAST_ACTIVE_KEY, ts.toString())
+  } else {
+    localStorage.removeItem(LAST_ACTIVE_KEY)
+  }
 }

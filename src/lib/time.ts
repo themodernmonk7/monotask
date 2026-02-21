@@ -48,3 +48,12 @@ export function formatDateHeader(timestamp: number): string {
     year: "numeric",
   })
 }
+/**
+ * Parse HH:MM:SS strings back into total seconds
+ */
+export function parseElapsed(str: string): number {
+  const parts = str.split(":").map((p) => parseInt(p, 10))
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return 0
+  const [h, m, s] = parts
+  return h * 3600 + m * 60 + s
+}

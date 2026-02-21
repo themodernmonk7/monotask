@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from "react"
 import { motion } from "motion/react"
 import { useApp } from "../context/AppContext"
-import { groupByDate, formatDateHeader, formatDuration } from "../lib/time"
+import { groupByDate, formatDateHeader, formatDuration, formatElapsed, parseElapsed } from "../lib/time"
 import type { CompletedTask } from "../types"
-import { Calendar, FolderOpen, Pencil } from "lucide-react"
+import { Calendar, FolderOpen, Pencil, History, CheckCircle2 } from "lucide-react"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+
 
 function groupByGroupName(tasks: CompletedTask[]): Map<string, CompletedTask[]> {
   const map = new Map<string, CompletedTask[]>()
@@ -17,81 +21,140 @@ function groupByGroupName(tasks: CompletedTask[]): Map<string, CompletedTask[]> 
 
 function CompletedTaskRow({
   task,
+  onUpdateName,
   onUpdateTime,
 }: {
   task: CompletedTask
+  onUpdateName: (id: string, name: string) => void
   onUpdateTime: (id: string, totalSeconds: number) => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [inputVal, setInputVal] = useState("")
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const totalMinutes = Math.round(task.totalSeconds / 60)
+  const [editingName, setEditingName] = useState(false)
+  const [editingTime, setEditingTime] = useState(false)
+  const [nameVal, setNameVal] = useState(task.taskName)
+  const [timeVal, setTimeVal] = useState("")
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const timeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (editing) {
-      inputRef.current?.focus()
-      inputRef.current?.select()
+    if (editingName) {
+      nameInputRef.current?.focus()
+      nameInputRef.current?.select()
     }
-  }, [editing])
+  }, [editingName])
 
-  const startEditing = () => {
-    setInputVal(String(totalMinutes))
-    setEditing(true)
+  useEffect(() => {
+    if (editingTime) {
+      timeInputRef.current?.focus()
+      timeInputRef.current?.select()
+    }
+  }, [editingTime])
+
+  const startEditingTime = () => {
+    setTimeVal(formatElapsed(task.totalSeconds))
+    setEditingTime(true)
   }
 
-  const handleSave = () => {
-    const minutes = parseInt(inputVal.trim(), 10)
-    if (!Number.isNaN(minutes) && minutes >= 0) {
-      onUpdateTime(task.id, minutes * 60)
+  const handleSaveName = () => {
+    const trimmed = nameVal.trim()
+    if (trimmed && trimmed !== task.taskName) {
+      onUpdateName(task.id, trimmed)
+    } else {
+      setNameVal(task.taskName)
     }
-    setEditing(false)
+    setEditingName(false)
+  }
+
+  const handleSaveTime = () => {
+    const seconds = parseElapsed(timeVal.trim())
+    if (seconds !== task.totalSeconds && seconds >= 0) {
+      onUpdateTime(task.id, seconds)
+    }
+    setEditingTime(false)
   }
 
   return (
     <motion.li
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="px-4 pl-8 py-2 flex items-center justify-between gap-4 group"
+      initial={{ opacity: 0, x: -5 }}
+      animate={{ opacity: 1, x: 0 }}
+      className="px-4 py-2.5 flex items-center justify-between gap-4 group/row"
     >
-      <span className="font-medium text-slate-800 dark:text-slate-200">
-        {task.taskName}
-      </span>
-      <div className="flex items-center gap-1.5">
-        {editing ? (
-          <div className="flex items-center gap-1.5">
-            <input
-              ref={inputRef}
-              type="number"
-              min={0}
-              value={inputVal}
-              onChange={(e) => setInputVal(e.target.value)}
-              onBlur={handleSave}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSave()
-                if (e.key === "Escape") {
-                  setInputVal(String(totalMinutes))
-                  setEditing(false)
-                }
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500/60 shrink-0" />
+        
+        {editingName ? (
+          <Input
+            ref={nameInputRef}
+            value={nameVal}
+            onChange={(e) => setNameVal(e.target.value)}
+            onBlur={handleSaveName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSaveName()
+              if (e.key === "Escape") {
+                setNameVal(task.taskName)
+                setEditingName(false)
+              }
+            }}
+            className="h-8 py-0 bg-muted/50 focus-visible:ring-primary/20"
+          />
+        ) : (
+          <div className="flex items-center gap-2 min-w-0 flex-1 group/name">
+            <span 
+              className="font-medium text-foreground/80 truncate cursor-text hover:text-foreground transition-colors"
+              onClick={() => {
+                setNameVal(task.taskName)
+                setEditingName(true)
               }}
-              className="w-20 px-2 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-mono tabular-nums"
-            />
-            <span className="text-xs text-slate-500 dark:text-slate-400">min</span>
+            >
+              {task.taskName}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setNameVal(task.taskName)
+                setEditingName(true)
+              }}
+              className="h-6 w-6 opacity-0 group-hover/name:opacity-100 transition-opacity"
+            >
+              <Pencil className="w-3 h-3 text-muted-foreground" />
+            </Button>
+          </div>
+        )}
+      </div>
+      
+      <div className="flex items-center gap-2 shrink-0">
+        {editingTime ? (
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200">
+              <Input
+                ref={timeInputRef}
+                value={timeVal}
+                onChange={(e) => setTimeVal(e.target.value)}
+                onBlur={handleSaveTime}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveTime()
+                  if (e.key === "Escape") setEditingTime(false)
+                }}
+                placeholder="00:00:00"
+                className="w-24 h-8 px-2 text-xs font-mono bg-muted text-right"
+              />
+            </div>
+            <span className="text-[8px] font-bold text-muted-foreground/50 uppercase tracking-tighter">HH:MM:SS</span>
           </div>
         ) : (
-          <>
-            <span className="font-mono text-sm text-slate-600 dark:text-slate-300 tabular-nums">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm text-muted-foreground tabular-nums">
               {formatDuration(task.totalSeconds)}
             </span>
-            <button
-              type="button"
-              onClick={startEditing}
-              className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:text-slate-300 dark:hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-opacity"
-              title="Edit time"
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={startEditingTime}
+              className="h-7 w-7 rounded-full text-muted-foreground opacity-0 group-hover/row:opacity-100 transition-all hover:bg-muted"
             >
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
-          </>
+              <Pencil className="w-3 h-3" />
+            </Button>
+          </div>
         )}
       </div>
     </motion.li>
@@ -99,64 +162,73 @@ function CompletedTaskRow({
 }
 
 export function CompletedTasks() {
-  const { completedTasks: tasks, updateCompletedTask } = useApp()
+  const { completedTasks: tasks, updateCompletedTask, updateCompletedTaskName } = useApp()
   const byDate = groupByDate(tasks)
   const sortedDates = Array.from(byDate.keys()).sort((a, b) => (a > b ? -1 : 1))
 
   if (tasks.length === 0) {
     return (
-      <div className="text-center py-8 text-slate-500 dark:text-slate-400">
-        <Calendar className="w-12 h-12 mx-auto mb-2 opacity-50" />
-        <p>No completed tasks yet.</p>
-        <p className="text-sm mt-1">Mark tasks as done to see them here.</p>
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center">
+          <History className="w-8 h-8 text-muted-foreground/40" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="font-semibold text-foreground/80">No history yet</h3>
+          <p className="text-sm text-muted-foreground max-w-[200px]">
+            Tasks you complete will appear here.
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 pb-10">
       {sortedDates.map((dateKey) => {
         const items = byDate.get(dateKey)!
         const first = items[0]
         const headerDate = formatDateHeader(first.completedAt)
         const byGroup = groupByGroupName(items)
         const groupNames = Array.from(byGroup.keys()).sort()
+        
         return (
-          <motion.section
-            key={dateKey}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 overflow-hidden"
-          >
-            <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800/50 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-slate-500" />
-              <span className="font-medium text-slate-700 dark:text-slate-300">
+          <section key={dateKey} className="space-y-4">
+            <div className="flex items-center gap-3 px-1">
+              <Calendar className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-bold tracking-tight uppercase text-muted-foreground">
                 {headerDate}
-              </span>
+              </h2>
+              <div className="h-px bg-muted flex-1" />
             </div>
-            <div className="divide-y divide-slate-200 dark:divide-slate-700">
+
+            <div className="space-y-4">
               {groupNames.map((groupName) => {
                 const groupTasks = byGroup.get(groupName)!
                 return (
-                  <div key={groupName} className="py-2">
-                    <div className="px-4 py-1.5 flex items-center gap-2 text-slate-600 dark:text-slate-400">
-                      <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-                      <span className="font-medium text-sm">{groupName}</span>
+                  <Card key={groupName} className="overflow-hidden border-border/40 shadow-sm bg-card/50 pt-0">
+                    <div className="p-4 bg-muted/20 border-b border-border/40 flex items-center">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        <span className="text-xs font-bold uppercase tracking-wider">{groupName}</span>
+                      </div>
                     </div>
-                    <ul className="mt-0.5">
-                      {groupTasks.map((task) => (
-                        <CompletedTaskRow
-                          key={task.id}
-                          task={task}
-                          onUpdateTime={updateCompletedTask}
-                        />
-                      ))}
-                    </ul>
-                  </div>
+                    <CardContent className="p-0">
+                      <ul className="divide-y divide-border/20">
+                        {groupTasks.map((task) => (
+                          <CompletedTaskRow
+                            key={task.id}
+                            task={task}
+                            onUpdateName={updateCompletedTaskName}
+                            onUpdateTime={updateCompletedTask}
+                          />
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
                 )
               })}
             </div>
-          </motion.section>
+          </section>
         )
       })}
     </div>

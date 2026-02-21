@@ -1,5 +1,5 @@
 import { formatElapsed } from "../lib/time"
-import { cn } from "../lib/utils"
+import { cn } from "@/lib/utils"
 
 interface TimerDisplayProps {
   elapsedSeconds: number
@@ -11,8 +11,8 @@ export function TimerDisplay({ elapsedSeconds, isRunning, className }: TimerDisp
   return (
     <span
       className={cn(
-        "font-mono tabular-nums text-sm",
-        isRunning && "text-emerald-600 dark:text-emerald-400 font-medium",
+        "font-mono tabular-nums text-sm tracking-tight",
+        isRunning ? "text-primary font-bold" : "text-muted-foreground font-medium",
         className
       )}
     >

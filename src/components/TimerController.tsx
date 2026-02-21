@@ -1,7 +1,8 @@
 import { Play, Pause, Check } from "lucide-react"
 import { useApp } from "../context/AppContext"
 import { TimerDisplay } from "./TimerDisplay"
-import { cn } from "../lib/utils"
+import { Button } from "@/components/ui/button"
+import { motion, AnimatePresence } from "motion/react"
 
 interface TimerControllerProps {
   groupId: string
@@ -19,45 +20,59 @@ export function TimerController({
   const { startTask, pauseTask, markTaskDone } = useApp()
 
   return (
-    <div className="flex items-center gap-3 flex-wrap">
+    <div className="flex items-center gap-3">
       <TimerDisplay elapsedSeconds={elapsedSeconds} isRunning={isRunning} />
-      <div className="flex items-center gap-1">
-        {isRunning ? (
-          <button
-            type="button"
-            onClick={() => pauseTask()}
-            className={cn(
-              "p-2 rounded-lg transition-colors",
-              "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/60"
-            )}
-            title="Pause"
-          >
-            <Pause className="w-4 h-4" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => startTask(groupId, taskId)}
-            className={cn(
-              "p-2 rounded-lg transition-colors",
-              "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
-            )}
-            title="Start"
-          >
-            <Play className="w-4 h-4" />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => markTaskDone(groupId, taskId)}
-          className={cn(
-            "p-2 rounded-lg transition-colors",
-            "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+      
+      <div className="flex items-center gap-1.5 p-1 bg-white/[0.03] rounded-full border border-white/5 transition-all duration-500 hover:border-white/10 group-hover/task:bg-white/[0.05]">
+        <AnimatePresence mode="wait">
+          {isRunning ? (
+            <motion.div
+              key="pause"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => pauseTask()}
+                className="h-8 w-8 rounded-full bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 hover:text-amber-400 transition-all"
+                title="Pause"
+              >
+                <Pause className="w-3.5 h-3.5 fill-current" />
+              </Button>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="start"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => startTask(groupId, taskId)}
+                className="h-8 w-8 rounded-full bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary transition-all"
+                title="Start"
+              >
+                <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+              </Button>
+            </motion.div>
           )}
+        </AnimatePresence>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => markTaskDone(groupId, taskId)}
+          className="h-8 w-8 rounded-full text-muted-foreground/40 hover:text-primary hover:bg-primary/10 transition-all"
           title="Mark as done"
         >
           <Check className="w-4 h-4" />
-        </button>
+        </Button>
       </div>
     </div>
   )

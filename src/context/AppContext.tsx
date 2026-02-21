@@ -8,6 +8,7 @@ import {
 } from "react"
 import type { Group, CompletedTask, Note } from "../types"
 import * as storage from "../lib/storage"
+import { getRunningTaskId, setRunningTaskId, getLastActiveTimestamp, setLastActiveTimestamp } from "../lib/storage"
 
 interface AppContextValue {
   groups: Group[]
@@ -20,15 +21,18 @@ interface AppContextValue {
   toggleGroupExpanded: (groupId: string) => void
   addTask: (groupId: string, name: string) => void
   updateTaskElapsed: (groupId: string, taskId: string, elapsedSeconds: number) => void
+  updateTaskName: (groupId: string, taskId: string, name: string) => void
   removeTask: (groupId: string, taskId: string) => void
   startTask: (groupId: string, taskId: string) => void
   pauseTask: () => void
   markTaskDone: (groupId: string, taskId: string) => void
-  updateCompletedTask: (completedTaskId: string, totalSeconds: number) => void
-
   addNote: (text: string) => void
   toggleNote: (noteId: string) => void
+  updateNote: (noteId: string, text: string) => void
   removeNote: (noteId: string) => void
+
+  updateCompletedTaskName: (completedTaskId: string, name: string) => void
+  updateCompletedTask: (completedTaskId: string, totalSeconds: number) => void
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -39,11 +43,33 @@ function generateId(): string {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [groups, setGroups] = useState<Group[]>(() => storage.getGroupsFromStorage())
-  const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
+  const [runningTaskId, setRunningTaskIdState] = useState<string | null>(() => getRunningTaskId())
   const [completedTasks, setCompletedTasks] = useState<CompletedTask[]>(() =>
     storage.getCompletedTasks()
   )
   const [notes, setNotes] = useState<Note[]>(() => storage.getNotes())
+
+  // Handle persistence and gap calculation on load
+  useEffect(() => {
+    const runningId = getRunningTaskId()
+    const lastActive = getLastActiveTimestamp()
+    
+    if (runningId && lastActive) {
+      const gapSeconds = Math.floor((Date.now() - lastActive) / 1000)
+      if (gapSeconds > 0) {
+        setGroups((prev) =>
+          prev.map((g) => ({
+            ...g,
+            tasks: g.tasks.map((t) =>
+              t.id === runningId
+                ? { ...t, elapsedSeconds: t.elapsedSeconds + gapSeconds }
+                : t
+            ),
+          }))
+        )
+      }
+    }
+  }, []) // Run once on mount
 
   // Persist groups
   useEffect(() => {
@@ -72,6 +98,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ),
         }))
       )
+      // Persist last active timestamp every second
+      setLastActiveTimestamp(Date.now())
     }, 1000)
     return () => clearInterval(interval)
   }, [runningTaskId])
@@ -88,7 +116,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (runningTaskId) {
       const group = groups.find((g) => g.id === groupId)
       const taskInGroup = group?.tasks.some((t) => t.id === runningTaskId)
-      if (taskInGroup) setRunningTaskId(null)
+      if (taskInGroup) {
+        setRunningTaskIdState(null)
+        setRunningTaskId(null)
+        setLastActiveTimestamp(null)
+      }
     }
   }, [runningTaskId, groups])
 
@@ -126,28 +158,53 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     )
   }, [])
 
+  const updateTaskName = useCallback((groupId: string, taskId: string, name: string) => {
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              tasks: g.tasks.map((t) => (t.id === taskId ? { ...t, name } : t)),
+            }
+          : g
+      )
+    )
+  }, [])
+
   const removeTask = useCallback((groupId: string, taskId: string) => {
     setGroups((prev) =>
       prev.map((g) =>
         g.id === groupId ? { ...g, tasks: g.tasks.filter((t) => t.id !== taskId) } : g
       )
     )
-    if (runningTaskId === taskId) setRunningTaskId(null)
+    if (runningTaskId === taskId) {
+      setRunningTaskIdState(null)
+      setRunningTaskId(null)
+      setLastActiveTimestamp(null)
+    }
   }, [runningTaskId])
 
   const startTask = useCallback((_groupId: string, taskId: string) => {
+    setRunningTaskIdState(taskId)
     setRunningTaskId(taskId)
+    setLastActiveTimestamp(Date.now())
   }, [])
 
   const pauseTask = useCallback(() => {
+    setRunningTaskIdState(null)
     setRunningTaskId(null)
+    setLastActiveTimestamp(null)
   }, [])
 
   const markTaskDone = useCallback((groupId: string, taskId: string) => {
     const group = groups.find((g) => g.id === groupId)
     const task = group?.tasks.find((t) => t.id === taskId)
     if (!group || !task) return
-    if (runningTaskId === taskId) setRunningTaskId(null)
+    if (runningTaskId === taskId) {
+      setRunningTaskIdState(null)
+      setRunningTaskId(null)
+      setLastActiveTimestamp(null)
+    }
     setCompletedTasks((prev) => [
       ...prev,
       {
@@ -165,6 +222,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     )
   }, [groups, runningTaskId])
 
+  const updateCompletedTaskName = useCallback((completedTaskId: string, taskName: string) => {
+    setCompletedTasks((prev) =>
+      prev.map((t) => (t.id === completedTaskId ? { ...t, taskName } : t))
+    )
+  }, [])
+
   const updateCompletedTask = useCallback((completedTaskId: string, totalSeconds: number) => {
     setCompletedTasks((prev) =>
       prev.map((t) =>
@@ -174,12 +237,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const addNote = useCallback((text: string) => {
-    setNotes((prev) => [...prev, { id: generateId(), text, checked: false }])
+    setNotes((prev) => [{ id: generateId(), text, checked: false }, ...prev])
   }, [])
 
   const toggleNote = useCallback((noteId: string) => {
     setNotes((prev) =>
       prev.map((n) => (n.id === noteId ? { ...n, checked: !n.checked } : n))
+    )
+  }, [])
+
+  const updateNote = useCallback((noteId: string, text: string) => {
+    setNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, text } : n))
     )
   }, [])
 
@@ -198,13 +267,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleGroupExpanded,
       addTask,
       updateTaskElapsed,
+      updateTaskName,
       removeTask,
       startTask,
       pauseTask,
       markTaskDone,
+      updateCompletedTaskName,
       updateCompletedTask,
       addNote,
       toggleNote,
+      updateNote,
       removeNote,
     }),
     [
@@ -217,13 +289,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleGroupExpanded,
       addTask,
       updateTaskElapsed,
+      updateTaskName,
       removeTask,
       startTask,
       pauseTask,
       markTaskDone,
+      updateCompletedTaskName,
       updateCompletedTask,
       addNote,
       toggleNote,
+      updateNote,
       removeNote,
     ]
   )
