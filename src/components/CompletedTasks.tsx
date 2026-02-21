@@ -4,7 +4,7 @@ import { useApp } from "../context/AppContext"
 import { groupByDate, formatDateHeader, formatDuration, formatElapsed, parseElapsed } from "../lib/time"
 import type { CompletedTask } from "../types"
 import { Calendar, FolderOpen, Pencil, History, CheckCircle2 } from "lucide-react"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
