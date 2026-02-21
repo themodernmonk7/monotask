@@ -1,73 +1,64 @@
-# React + TypeScript + Vite
+# 🎯 Monotask
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Stop clicking, start focusing.**
 
-Currently, two official plugins are available:
+Monotask is a high-performance, minimalistic time-tracking and deep-work companion. It was built for developers and creators who are tired of the "too many clicks" overhead in tools like JIRA, Zoho, or ClickUp.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+<!-- ![Monotask Header](https://raw.githubusercontent.com/lucide-react/lucide/main/icons/timer.svg) -->
 
-## React Compiler
+## 🚀 Why Monotask?
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Enterprise tools are built for managers; **Monotask is built for you.**
 
-## Expanding the ESLint configuration
+Time tracking in JIRA or ClickUp often feels like a chore—navigating complex UIs, multiple modals, and endless dropdowns just to log a few minutes of work. Monotask eliminates this friction:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Zero Setup**: No login, no project configuration. Just open and track.
+- **Direct Action**: Mark tasks as done and track time in a single click.
+- **Deep Work Focus**: A sophisticated "Midnight" theme designed to stay out of your way and keep your eyes fresh.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## ✨ Core Features
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### ⏱️ Persistent Timer
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Refresh the page? Close the tab? Your timer doesn't care. Monotask calculates and resumes your active session automatically, ensuring you never lose a second of tracked work.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 📝 Smart Notes
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+A built-in scratchpad for your thoughts during focus sessions.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- **Auto-Sorting**: Completed notes move down, active thoughts stay up.
+- **Multiline Support**: Jot down complex ideas with simple `Cmd + Enter` saves.
+
+### 📊 Accurate History
+
+View and edit your completed sessions with precision. Edit task names or durations in a direct `HH:MM:SS` format—no rounding errors, no guesswork.
+
+### 🌑 Aesthetic Midnight Theme
+
+A custom-tuned dark mode using OKLCH color space for a softer, more premium "midnight slate" feel that's easy on the eyes during long sessions.
+
+## 🛠️ Coming Soon
+
+We're bringing back the "direct" philosophy to your existing workflow:
+
+- **Direct Pushes**: One-click export to **JIRA**, **Zoho Projects**, and **ClickUp**. Track locally, sync globally.
+- **Keyboard-First Navigation**: Total control without touching the mouse.
+
+<!-- ## 💻 Getting Started
+
+1. **Clone & Install**:
+
+   ```bash
+   git clone [repository-url]
+   cd Monotask
+   yarn install
+   ```
+
+2. **Run Locally**:
+   ```bash
+   yarn dev
+   ```
+
+---
+
+_Monotask is open source and designed for high-performance individuals._ -->
