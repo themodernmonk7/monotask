@@ -1,11 +1,11 @@
-import { useState } from "react"
-import { motion, AnimatePresence } from "motion/react"
-import { ChevronRight, Plus, FolderOpen, Trash2 } from "lucide-react"
-import { useApp } from "../context/AppContext"
-import { TaskItem } from "./TaskItem"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent } from "@/components/ui/card"
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ChevronRight, Plus, FolderOpen, Trash2 } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { TaskItem } from './TaskItem';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,8 +16,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import { cn } from "@/lib/utils"
+} from '@/components/ui/alert-dialog';
+import { cn } from '@/lib/utils';
 
 export function GroupList() {
   const {
@@ -27,33 +27,33 @@ export function GroupList() {
     removeGroup,
     toggleGroupExpanded,
     addTask,
-  } = useApp()
-  const [newGroupName, setNewGroupName] = useState("")
-  const [newTaskNames, setNewTaskNames] = useState<Record<string, string>>({})
+  } = useApp();
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newTaskNames, setNewTaskNames] = useState<Record<string, string>>({});
 
   const handleAddGroup = (e: React.FormEvent) => {
-    e.preventDefault()
-    const name = newGroupName.trim()
+    e.preventDefault();
+    const name = newGroupName.trim();
     if (name) {
-      addGroup(name)
-      setNewGroupName("")
+      addGroup(name);
+      setNewGroupName('');
     }
-  }
+  };
 
   const handleAddTask = (e: React.FormEvent, groupId: string) => {
-    e.preventDefault()
-    const name = (newTaskNames[groupId] ?? "").trim()
+    e.preventDefault();
+    const name = (newTaskNames[groupId] ?? '').trim();
     if (name) {
-      addTask(groupId, name)
-      setNewTaskNames((prev) => ({ ...prev, [groupId]: "" }))
+      addTask(groupId, name);
+      setNewTaskNames((prev) => ({ ...prev, [groupId]: '' }));
     }
-  }
+  };
 
   if (groups.length === 0) {
     return (
       <div className="space-y-6">
         <Card className="border-dashed bg-muted/30">
-          <CardContent className="pt-6">
+          <CardContent>
             <form onSubmit={handleAddGroup} className="flex items-center gap-2">
               <Input
                 value={newGroupName}
@@ -77,12 +77,15 @@ export function GroupList() {
           </p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-6">
-      <form onSubmit={handleAddGroup} className="flex items-center gap-2 p-1 bg-muted/30 rounded-xl border">
+      <form
+        onSubmit={handleAddGroup}
+        className="flex items-center gap-2 p-4 bg-muted/30 rounded-xl border"
+      >
         <Input
           value={newGroupName}
           onChange={(e) => setNewGroupName(e.target.value)}
@@ -98,8 +101,10 @@ export function GroupList() {
       <div className="grid gap-4">
         <AnimatePresence mode="popLayout">
           {groups.map((group) => {
-            const isRunningInGroup = group.tasks.some(t => t.id === runningTaskId)
-            const isExpanded = group.expanded !== false
+            const isRunningInGroup = group.tasks.some(
+              (t) => t.id === runningTaskId,
+            );
+            const isExpanded = group.expanded !== false;
 
             return (
               <motion.div
@@ -110,44 +115,60 @@ export function GroupList() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.2 }}
               >
-                <Card className={cn(
-                  "overflow-hidden transition-all duration-500 border-border/40 shadow-sm hover:shadow-lg",
-                  isExpanded ? "bg-card shadow-lg" : "bg-card/40",
-                  !isExpanded && isRunningInGroup && "running-group-highlight"
-                )}>
+                <Card
+                  className={cn(
+                    'overflow-hidden transition-all duration-500 border-border/40 shadow-sm hover:shadow-lg',
+                    isExpanded ? 'bg-card shadow-lg' : 'bg-card/40',
+                    !isExpanded &&
+                      isRunningInGroup &&
+                      'running-group-highlight',
+                  )}
+                >
                   <div
                     role="button"
                     tabIndex={0}
                     onClick={() => toggleGroupExpanded(group.id)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        toggleGroupExpanded(group.id)
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleGroupExpanded(group.id);
                       }
                     }}
-                    className="w-full flex items-center gap-3 py-4 px-5 text-left transition-all cursor-pointer group select-none"
+                    className="w-full flex items-center gap-3 pb-4 px-5 text-left transition-all cursor-pointer group select-none"
                   >
                     <div className="relative flex items-center justify-center">
                       <motion.div
                         animate={{ rotate: isExpanded ? 90 : 0 }}
-                        transition={{ duration: 0.3, ease: "easeOut" }}
+                        transition={{ duration: 0.3, ease: 'easeOut' }}
                       >
-                        <ChevronRight className={cn(
-                          "w-4 h-4 transition-colors",
-                          isRunningInGroup ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
-                        )} />
+                        <ChevronRight
+                          className={cn(
+                            'w-4 h-4 transition-colors',
+                            isRunningInGroup
+                              ? 'text-primary'
+                              : 'text-muted-foreground group-hover:text-foreground',
+                          )}
+                        />
                       </motion.div>
                     </div>
-                    
+
                     <div className="flex-1 flex items-center gap-3 min-w-0">
-                      <FolderOpen className={cn(
-                        "w-4.5 h-4.5 transition-all duration-500",
-                        isExpanded || isRunningInGroup ? "text-primary scale-110" : "text-muted-foreground"
-                      )} />
-                      <span className={cn(
-                        "font-bold tracking-tight truncate transition-colors",
-                        isRunningInGroup ? "text-primary" : "text-foreground/90"
-                      )}>
+                      <FolderOpen
+                        className={cn(
+                          'w-4.5 h-4.5 transition-all duration-500',
+                          isExpanded || isRunningInGroup
+                            ? 'text-primary scale-110'
+                            : 'text-muted-foreground',
+                        )}
+                      />
+                      <span
+                        className={cn(
+                          'font-bold tracking-tight truncate transition-colors',
+                          isRunningInGroup
+                            ? 'text-primary'
+                            : 'text-foreground/90',
+                        )}
+                      >
                         {group.name}
                       </span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 font-black text-primary/80 uppercase tracking-tighter shadow-inner">
@@ -170,12 +191,16 @@ export function GroupList() {
                         <AlertDialogHeader>
                           <AlertDialogTitle>Delete Group?</AlertDialogTitle>
                           <AlertDialogDescription className="text-muted-foreground">
-                            This will delete "{group.name}" and all {group.tasks.length} tasks within it. This action is permanent.
+                            This will delete "{group.name}" and all{' '}
+                            {group.tasks.length} tasks within it. This action is
+                            permanent.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                          <AlertDialogCancel className="bg-muted hover:bg-muted/80 border-none">Cancel</AlertDialogCancel>
-                          <AlertDialogAction 
+                          <AlertDialogCancel className="bg-muted hover:bg-muted/80 border-none">
+                            Cancel
+                          </AlertDialogCancel>
+                          <AlertDialogAction
                             onClick={() => removeGroup(group.id)}
                             className="bg-destructive hover:bg-destructive/80 text-white border-none"
                           >
@@ -189,9 +214,17 @@ export function GroupList() {
                   <AnimatePresence initial={false}>
                     {isExpanded && (
                       <motion.div
-                        initial={{ height: 0, opacity: 0, filter: "blur(10px)" }}
-                        animate={{ height: "auto", opacity: 1, filter: "blur(0px)" }}
-                        exit={{ height: 0, opacity: 0, filter: "blur(10px)" }}
+                        initial={{
+                          height: 0,
+                          opacity: 0,
+                          filter: 'blur(10px)',
+                        }}
+                        animate={{
+                          height: 'auto',
+                          opacity: 1,
+                          filter: 'blur(0px)',
+                        }}
+                        exit={{ height: 0, opacity: 0, filter: 'blur(10px)' }}
                         transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
                       >
                         <div className="px-5 pb-5 pt-0 space-y-6">
@@ -201,7 +234,7 @@ export function GroupList() {
                             className="flex gap-2"
                           >
                             <Input
-                              value={newTaskNames[group.id] ?? ""}
+                              value={newTaskNames[group.id] ?? ''}
                               onChange={(e) =>
                                 setNewTaskNames((prev) => ({
                                   ...prev,
@@ -220,7 +253,7 @@ export function GroupList() {
                               <Plus className="w-4 h-4" />
                             </Button>
                           </form>
-                          
+
                           <div className="grid gap-2">
                             <AnimatePresence mode="popLayout" initial={false}>
                               {group.tasks.map((task) => (
@@ -246,11 +279,12 @@ export function GroupList() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-              </Card>
-            </motion.div>
-          )})}
+                </Card>
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
       </div>
     </div>
-  )
+  );
 }
