@@ -225,18 +225,28 @@ export function CompletedTasks() {
             <div className="space-y-4">
               {groupNames.map((groupName) => {
                 const groupTasks = byGroup.get(groupName)!;
+                const totalGroupSeconds = groupTasks.reduce(
+                  (sum, t) => sum + t.totalSeconds,
+                  0,
+                );
                 return (
                   <Card
                     key={groupName}
                     className="overflow-hidden border-border/40 shadow-sm bg-card/50 gap-4 py-4 pt-0"
                   >
-                    <div className="p-4 bg-muted/20 border-b border-border/40 flex items-center">
+                    <div className="p-4 bg-muted/20 border-b border-border/40 flex justify-between items-center">
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <FolderOpen className="w-3.5 h-3.5" />
                         <span className="text-xs font-bold uppercase tracking-wider">
                           {groupName}
                         </span>
                       </div>
+                      <p className="text-xs font-bold tracking-wider capitalize">
+                        Total time:
+                        <span className="font-mono text-sm text-muted-foreground tabular-nums ml-2">
+                          {formatDuration(totalGroupSeconds)}
+                        </span>
+                      </p>
                     </div>
                     <CardContent className="p-0">
                       <ul className="divide-y divide-border/20">

@@ -134,7 +134,7 @@ export function GroupList() {
                         toggleGroupExpanded(group.id);
                       }
                     }}
-                    className="w-full flex items-center gap-3 pb-4 px-5 text-left transition-all cursor-pointer group select-none"
+                    className="w-full flex items-center gap-3 px-4 text-left transition-all cursor-pointer group select-none"
                   >
                     <div className="relative flex items-center justify-center">
                       <motion.div
@@ -227,7 +227,7 @@ export function GroupList() {
                         exit={{ height: 0, opacity: 0, filter: 'blur(10px)' }}
                         transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
                       >
-                        <div className="px-5 pb-5 pt-0 space-y-6">
+                        <div className="px-4 pb-4 pt-0 space-y-6">
                           <div className="h-px bg-border/40 mb-4" />
                           <form
                             onSubmit={(e) => handleAddTask(e, group.id)}

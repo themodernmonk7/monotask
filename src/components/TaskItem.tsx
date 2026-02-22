@@ -108,9 +108,9 @@ export function TaskItem({
           </div>
         ) : (
           <div className="flex items-center gap-2 flex-1 min-w-0 group/name">
-            <span
+            <p
               className={cn(
-                'font-semibold tracking-tight truncate transition-colors cursor-text shrink-0',
+                'font-semibold tracking-tight truncate transition-colors cursor-text text-wrap',
                 isRunning
                   ? 'text-primary'
                   : 'text-foreground/90 group-hover/task:text-foreground',
@@ -118,7 +118,7 @@ export function TaskItem({
               onClick={() => setIsEditing(true)}
             >
               {taskName}
-            </span>
+            </p>
             <Button
               variant="ghost"
               size="icon"

@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
 } from "react"
 import type { Group, CompletedTask, Note } from "../types"
 import * as storage from "../lib/storage"
@@ -86,22 +87,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     storage.setNotes(notes)
   }, [notes])
 
+  const timerRef = useRef<number | null>(null)
+  const startTimeRef = useRef<number | null>(null)
+  const baseSecondsRef = useRef<number>(0)
+  const groupsRef = useRef(groups)
+
+  // Keep groupsRef in sync
+  useEffect(() => {
+    groupsRef.current = groups
+  }, [groups])
+
   // Global timer: tick every second for the running task
   useEffect(() => {
-    if (!runningTaskId) return
-    const interval = setInterval(() => {
-      setGroups((prev) =>
-        prev.map((g) => ({
-          ...g,
-          tasks: g.tasks.map((t) =>
-            t.id === runningTaskId ? { ...t, elapsedSeconds: t.elapsedSeconds + 1 } : t
-          ),
-        }))
-      )
-      // Persist last active timestamp every second
-      setLastActiveTimestamp(Date.now())
-    }, 1000)
-    return () => clearInterval(interval)
+    if (!runningTaskId) {
+      if (timerRef.current) cancelAnimationFrame(timerRef.current)
+      startTimeRef.current = null
+      return
+    }
+
+    // Capture the state when we start/resume
+    const task = groupsRef.current.flatMap((g) => g.tasks).find((t) => t.id === runningTaskId)
+    baseSecondsRef.current = task ? task.elapsedSeconds : 0
+    startTimeRef.current = Date.now()
+    
+    let lastSecondReported = -1
+
+    const tick = () => {
+      if (!startTimeRef.current) return
+
+      const now = Date.now()
+      const elapsedSinceStart = Math.floor((now - startTimeRef.current) / 1000)
+      const totalElapsed = baseSecondsRef.current + elapsedSinceStart
+      
+      // Update state only when the second changes to avoid unnecessary re-renders
+      if (totalElapsed !== lastSecondReported) {
+        setGroups((prev) =>
+          prev.map((g) => ({
+            ...g,
+            tasks: g.tasks.map((t) =>
+              t.id === runningTaskId ? { ...t, elapsedSeconds: totalElapsed } : t
+            ),
+          }))
+        )
+        setLastActiveTimestamp(now)
+        lastSecondReported = totalElapsed
+      }
+      
+      timerRef.current = requestAnimationFrame(tick)
+    }
+
+    timerRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (timerRef.current) cancelAnimationFrame(timerRef.current)
+    }
   }, [runningTaskId])
 
   const addGroup = useCallback((name: string) => {
