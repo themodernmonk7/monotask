@@ -5,6 +5,7 @@ const NOTES_KEY = "monotask-notes"
 const GROUPS_KEY = "monotask-groups"
 const RUNNING_TASK_ID_KEY = "monotask-running-task-id"
 const LAST_ACTIVE_KEY = "monotask-last-active"
+const THEME_KEY = "monotask-theme"
 
 export function getCompletedTasks(): CompletedTask[] {
   try {
@@ -72,4 +73,12 @@ export function setLastActiveTimestamp(ts: number | null): void {
   } else {
     localStorage.removeItem(LAST_ACTIVE_KEY)
   }
+}
+
+export function getTheme(): "light" | "dark" {
+  return (localStorage.getItem(THEME_KEY) as "light" | "dark") || "dark"
+}
+
+export function setTheme(theme: "light" | "dark"): void {
+  localStorage.setItem(THEME_KEY, theme)
 }
