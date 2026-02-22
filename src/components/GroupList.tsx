@@ -109,7 +109,6 @@ export function GroupList() {
             return (
               <motion.div
                 key={group.id}
-                layout
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
@@ -117,7 +116,7 @@ export function GroupList() {
               >
                 <Card
                   className={cn(
-                    'overflow-hidden transition-all duration-500 border-border/40 shadow-sm hover:shadow-lg',
+                    'overflow-hidden border-border/40 shadow-sm hover:shadow-lg gap-0 py-0',
                     isExpanded ? 'bg-card shadow-lg' : 'bg-card/40',
                     !isExpanded &&
                       isRunningInGroup &&
@@ -134,7 +133,7 @@ export function GroupList() {
                         toggleGroupExpanded(group.id);
                       }
                     }}
-                    className="w-full flex items-center gap-3 px-4 text-left transition-all cursor-pointer group select-none"
+                    className="w-full flex items-center gap-3 px-4 py-4 text-left cursor-pointer group select-none"
                   >
                     <div className="relative flex items-center justify-center">
                       <motion.div
@@ -217,21 +216,20 @@ export function GroupList() {
                         initial={{
                           height: 0,
                           opacity: 0,
-                          filter: 'blur(10px)',
                         }}
                         animate={{
                           height: 'auto',
                           opacity: 1,
-                          filter: 'blur(0px)',
                         }}
-                        exit={{ height: 0, opacity: 0, filter: 'blur(10px)' }}
+                        exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+                        style={{ overflow: 'hidden' }}
                       >
-                        <div className="px-4 pb-4 pt-0 space-y-6">
-                          <div className="h-px bg-border/40 mb-4" />
+                        <div className="px-4 pb-4 pt-0">
+                          <div className="h-px bg-border/40 mb-6" />
                           <form
                             onSubmit={(e) => handleAddTask(e, group.id)}
-                            className="flex gap-2"
+                            className="flex gap-2 mb-6"
                           >
                             <Input
                               value={newTaskNames[group.id] ?? ''}
@@ -255,7 +253,7 @@ export function GroupList() {
                           </form>
 
                           <div className="grid gap-2">
-                            <AnimatePresence mode="popLayout" initial={false}>
+                            <AnimatePresence initial={false}>
                               {group.tasks.map((task) => (
                                 <TaskItem
                                   key={task.id}

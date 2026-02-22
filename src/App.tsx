@@ -51,7 +51,7 @@ function AppContent() {
 
       <main className="relative z-10 max-w-2xl mx-auto px-6 py-8">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-8 p-1 bg-muted/50 rounded-xl h-11">
+          <TabsList className="grid w-full grid-cols-3 mb-8 bg-muted/50 rounded-xl h-11">
             {TABS.map((tab) => (
               <TabsTrigger
                 key={tab.id}
