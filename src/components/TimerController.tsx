@@ -1,14 +1,14 @@
-import { Play, Pause, Check } from "lucide-react"
-import { useApp } from "../context/AppContext"
-import { TimerDisplay } from "./TimerDisplay"
-import { Button } from "@/components/ui/button"
-import { motion, AnimatePresence } from "motion/react"
+import { Play, Pause, Check } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { TimerDisplay } from './TimerDisplay';
+import { Button } from '@/components/ui/button';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface TimerControllerProps {
-  groupId: string
-  taskId: string
-  elapsedSeconds: number
-  isRunning: boolean
+  groupId: string;
+  taskId: string;
+  elapsedSeconds: number;
+  isRunning: boolean;
 }
 
 export function TimerController({
@@ -17,13 +17,22 @@ export function TimerController({
   elapsedSeconds,
   isRunning,
 }: TimerControllerProps) {
-  const { startTask, pauseTask, markTaskDone } = useApp()
+  const { startTask, pauseTask, markTaskDone } = useApp();
 
   return (
     <div className="flex items-center gap-3">
       <TimerDisplay elapsedSeconds={elapsedSeconds} isRunning={isRunning} />
-      
+
       <div className="flex items-center gap-1.5 p-1 bg-white/[0.03] rounded-full border border-white/5 transition-all duration-500 hover:border-white/10 group-hover/task:bg-white/[0.05]">
+        <Button
+          variant="ghost"
+          size="icon"
+          onDoubleClick={() => markTaskDone(groupId, taskId)}
+          className="h-8 w-8 rounded-full text-muted-foreground/40 hover:text-primary hover:bg-primary/10 transition-all"
+          title="Double click to mark as done"
+        >
+          <Check className="w-4 h-4" />
+        </Button>
         <AnimatePresence mode="wait">
           {isRunning ? (
             <motion.div
@@ -63,17 +72,7 @@ export function TimerController({
             </motion.div>
           )}
         </AnimatePresence>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => markTaskDone(groupId, taskId)}
-          className="h-8 w-8 rounded-full text-muted-foreground/40 hover:text-primary hover:bg-primary/10 transition-all"
-          title="Mark as done"
-        >
-          <Check className="w-4 h-4" />
-        </Button>
       </div>
     </div>
-  )
+  );
 }

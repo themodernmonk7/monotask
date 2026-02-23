@@ -240,6 +240,9 @@ export function CompletedTasks() {
                         <span className="text-xs font-bold uppercase tracking-wider">
                           {groupName}
                         </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 font-black text-primary/80 uppercase tracking-tighter shadow-inner">
+                          {groupTasks.length}
+                        </span>
                       </div>
                       <p className="text-xs font-bold tracking-wider capitalize">
                         Total time:
