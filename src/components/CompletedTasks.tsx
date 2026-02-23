@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { useApp } from '../context/AppContext';
 import {
   groupByDate,
   formatDateHeader,
@@ -19,6 +18,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useApp } from '@/hooks/useApp';
 
 function groupByGroupName(
   tasks: CompletedTask[],
@@ -112,7 +112,7 @@ function CompletedTaskRow({
         ) : (
           <div className="flex items-center gap-2 min-w-0 flex-1 group/name">
             <span
-              className="font-medium text-foreground/80 truncate cursor-text hover:text-foreground transition-colors"
+              className="font-medium text-foreground/80 truncate cursor-text hover:text-foreground transition-colors text-wrap"
               onClick={() => {
                 setNameVal(task.taskName);
                 setEditingName(true);

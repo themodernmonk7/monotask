@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronRight, Plus, FolderOpen, Trash2 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { useApp } from '@/hooks/useApp';
 import { TaskItem } from './TaskItem';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,8 +25,10 @@ export function GroupList() {
     runningTaskId,
     addGroup,
     removeGroup,
+    reorderGroups,
     toggleGroupExpanded,
     addTask,
+    reorderTasks,
   } = useApp();
   const [newGroupName, setNewGroupName] = useState('');
   const [newTaskNames, setNewTaskNames] = useState<Record<string, string>>({});
@@ -100,7 +102,7 @@ export function GroupList() {
 
       <div className="grid gap-4">
         <AnimatePresence mode="popLayout">
-          {groups.map((group) => {
+          {groups.map((group, groupIndex) => {
             const isRunningInGroup = group.tasks.some(
               (t) => t.id === runningTaskId,
             );
@@ -109,175 +111,264 @@ export function GroupList() {
             return (
               <motion.div
                 key={group.id}
+                layout
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.2 }}
               >
-                <Card
-                  className={cn(
-                    'overflow-hidden border-border/40 shadow-sm hover:shadow-lg gap-0 py-0',
-                    isExpanded ? 'bg-card shadow-lg' : 'bg-card/40',
-                    !isExpanded &&
-                      isRunningInGroup &&
-                      'running-group-highlight',
-                  )}
-                >
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleGroupExpanded(group.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        toggleGroupExpanded(group.id);
+                <div
+                  draggable
+                  onDragStart={(e: React.DragEvent) => {
+                    e.dataTransfer.setData('text/plain', `group:${groupIndex}`);
+                    e.dataTransfer.effectAllowed = 'move';
+                    (e.currentTarget as HTMLElement).classList.add(
+                      'opacity-50',
+                    );
+                  }}
+                  onDragEnd={(e: React.DragEvent) => {
+                    (e.currentTarget as HTMLElement).classList.remove(
+                      'opacity-50',
+                    );
+                  }}
+                  onDragOver={(e: React.DragEvent) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(e: React.DragEvent) => {
+                    e.preventDefault();
+                    const data = e.dataTransfer.getData('text/plain');
+                    if (data.startsWith('group:')) {
+                      const sourceIndex = parseInt(data.split(':')[1], 10);
+                      if (sourceIndex !== groupIndex) {
+                        reorderGroups(sourceIndex, groupIndex);
                       }
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-4 text-left cursor-pointer group select-none"
+                    }
+                  }}
+                >
+                  <Card
+                    className={cn(
+                      'overflow-hidden border-border/40 shadow-sm hover:shadow-lg gap-0 py-0',
+                      isExpanded ? 'bg-card shadow-lg' : 'bg-card/40',
+                      !isExpanded &&
+                        isRunningInGroup &&
+                        'running-group-highlight',
+                    )}
                   >
-                    <div className="relative flex items-center justify-center">
-                      <motion.div
-                        animate={{ rotate: isExpanded ? 90 : 0 }}
-                        transition={{ duration: 0.3, ease: 'easeOut' }}
-                      >
-                        <ChevronRight
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggleGroupExpanded(group.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          toggleGroupExpanded(group.id);
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-4 text-left cursor-pointer group select-none"
+                    >
+                      <div className="relative flex items-center justify-center">
+                        <motion.div
+                          animate={{ rotate: isExpanded ? 90 : 0 }}
+                          transition={{ duration: 0.3, ease: 'easeOut' }}
+                        >
+                          <ChevronRight
+                            className={cn(
+                              'w-4 h-4 transition-colors',
+                              isRunningInGroup
+                                ? 'text-primary'
+                                : 'text-muted-foreground group-hover:text-foreground',
+                            )}
+                          />
+                        </motion.div>
+                      </div>
+
+                      <div className="flex-1 flex items-center gap-3 min-w-0">
+                        <FolderOpen
                           className={cn(
-                            'w-4 h-4 transition-colors',
-                            isRunningInGroup
-                              ? 'text-primary'
-                              : 'text-muted-foreground group-hover:text-foreground',
+                            'w-4.5 h-4.5 transition-all duration-500',
+                            isExpanded || isRunningInGroup
+                              ? 'text-primary scale-110'
+                              : 'text-muted-foreground',
                           )}
                         />
-                      </motion.div>
-                    </div>
-
-                    <div className="flex-1 flex items-center gap-3 min-w-0">
-                      <FolderOpen
-                        className={cn(
-                          'w-4.5 h-4.5 transition-all duration-500',
-                          isExpanded || isRunningInGroup
-                            ? 'text-primary scale-110'
-                            : 'text-muted-foreground',
-                        )}
-                      />
-                      <span
-                        className={cn(
-                          'font-bold tracking-tight truncate transition-colors',
-                          isRunningInGroup
-                            ? 'text-primary'
-                            : 'text-foreground/90',
-                        )}
-                      >
-                        {group.name}
-                      </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 font-black text-primary/80 uppercase tracking-tighter shadow-inner">
-                        {group.tasks.length}
-                      </span>
-                    </div>
-
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => e.stopPropagation()}
-                          className="h-8 w-8 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all z-20"
+                        <span
+                          className={cn(
+                            'font-bold tracking-tight truncate transition-colors',
+                            isRunningInGroup
+                              ? 'text-primary'
+                              : 'text-foreground/90',
+                          )}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent className="bg-card border-white/5 backdrop-blur-xl">
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete Group?</AlertDialogTitle>
-                          <AlertDialogDescription className="text-muted-foreground">
-                            This will delete "{group.name}" and all{' '}
-                            {group.tasks.length} tasks within it. This action is
-                            permanent.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel className="bg-muted hover:bg-muted/80 border-none">
-                            Cancel
-                          </AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => removeGroup(group.id)}
-                            className="bg-destructive hover:bg-destructive/80 text-white border-none"
-                          >
-                            Delete Group
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
+                          {group.name}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 font-black text-primary/80 uppercase tracking-tighter shadow-inner">
+                          {group.tasks.length}
+                        </span>
+                      </div>
 
-                  <AnimatePresence initial={false}>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{
-                          height: 0,
-                          opacity: 0,
-                        }}
-                        animate={{
-                          height: 'auto',
-                          opacity: 1,
-                        }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-                        style={{ overflow: 'hidden' }}
-                      >
-                        <div className="px-4 pb-4 pt-0">
-                          <div className="h-px bg-border/40 mb-6" />
-                          <form
-                            onSubmit={(e) => handleAddTask(e, group.id)}
-                            className="flex gap-2 mb-6"
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-8 w-8 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all z-20"
                           >
-                            <Input
-                              value={newTaskNames[group.id] ?? ''}
-                              onChange={(e) =>
-                                setNewTaskNames((prev) => ({
-                                  ...prev,
-                                  [group.id]: e.target.value,
-                                }))
-                              }
-                              placeholder="Add a new task..."
-                              className="bg-muted/30 border-none shadow-none text-sm h-9"
-                            />
-                            <Button
-                              type="submit"
-                              size="icon"
-                              variant="secondary"
-                              className="h-9 w-9 shrink-0 rounded-lg"
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="bg-card border-white/5 backdrop-blur-xl">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Group?</AlertDialogTitle>
+                            <AlertDialogDescription className="text-muted-foreground">
+                              This will delete "{group.name}" and all{' '}
+                              {group.tasks.length} tasks within it. This action
+                              is permanent.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel
+                              onClick={(e) => e.stopPropagation()}
+                              className="bg-muted hover:bg-muted/80 border-none"
                             >
-                              <Plus className="w-4 h-4" />
-                            </Button>
-                          </form>
+                              Cancel
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => removeGroup(group.id)}
+                              className="bg-destructive hover:bg-destructive/80 text-white border-none"
+                            >
+                              Delete Group
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
 
-                          <div className="grid gap-2">
-                            <AnimatePresence initial={false}>
-                              {group.tasks.map((task) => (
-                                <TaskItem
-                                  key={task.id}
-                                  groupId={group.id}
-                                  taskId={task.id}
-                                  taskName={task.name}
-                                  elapsedSeconds={task.elapsedSeconds}
-                                  isRunning={runningTaskId === task.id}
-                                />
-                              ))}
-                            </AnimatePresence>
-                            {group.tasks.length === 0 && (
-                              <div className="text-center py-6 bg-muted/10 rounded-lg border border-dashed">
-                                <p className="text-xs text-muted-foreground font-medium">
-                                  No tasks in this group.
-                                </p>
-                              </div>
-                            )}
+                    <AnimatePresence initial={false}>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{
+                            height: 0,
+                            opacity: 0,
+                          }}
+                          animate={{
+                            height: 'auto',
+                            opacity: 1,
+                          }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{
+                            duration: 0.4,
+                            ease: [0.23, 1, 0.32, 1],
+                          }}
+                          style={{ overflow: 'hidden' }}
+                        >
+                          <div className="px-4 pb-4 pt-0">
+                            <div className="h-px bg-border/40 mb-6" />
+                            <form
+                              onSubmit={(e) => handleAddTask(e, group.id)}
+                              className="flex gap-2 mb-6"
+                            >
+                              <Input
+                                value={newTaskNames[group.id] ?? ''}
+                                onChange={(e) =>
+                                  setNewTaskNames((prev) => ({
+                                    ...prev,
+                                    [group.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Add a new task..."
+                                className="bg-muted/30 border-none shadow-none text-sm h-9"
+                              />
+                              <Button
+                                type="submit"
+                                size="icon"
+                                variant="secondary"
+                                className="h-9 w-9 shrink-0 rounded-lg"
+                              >
+                                <Plus className="w-4 h-4" />
+                              </Button>
+                            </form>
+
+                            <div className="grid gap-2">
+                              <AnimatePresence mode="popLayout" initial={false}>
+                                {group.tasks.map((task, taskIndex) => (
+                                  <div
+                                    key={task.id}
+                                    draggable
+                                    onDragStart={(e: React.DragEvent) => {
+                                      e.stopPropagation();
+                                      e.dataTransfer.setData(
+                                        'text/plain',
+                                        `task:${group.id}:${taskIndex}`,
+                                      );
+                                      e.dataTransfer.effectAllowed = 'move';
+                                      (
+                                        e.currentTarget as HTMLElement
+                                      ).classList.add('opacity-50');
+                                    }}
+                                    onDragEnd={(e: React.DragEvent) => {
+                                      (
+                                        e.currentTarget as HTMLElement
+                                      ).classList.remove('opacity-50');
+                                    }}
+                                    onDragOver={(e: React.DragEvent) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      e.dataTransfer.dropEffect = 'move';
+                                    }}
+                                    onDrop={(e: React.DragEvent) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      const data =
+                                        e.dataTransfer.getData('text/plain');
+                                      if (data.startsWith('task:')) {
+                                        const [
+                                          ,
+                                          sourceGroupId,
+                                          sourceTaskIndexStr,
+                                        ] = data.split(':');
+                                        const sourceTaskIndex = parseInt(
+                                          sourceTaskIndexStr,
+                                          10,
+                                        );
+                                        if (
+                                          sourceGroupId === group.id &&
+                                          sourceTaskIndex !== taskIndex
+                                        ) {
+                                          reorderTasks(
+                                            group.id,
+                                            sourceTaskIndex,
+                                            taskIndex,
+                                          );
+                                        }
+                                      }
+                                    }}
+                                  >
+                                    <TaskItem
+                                      groupId={group.id}
+                                      taskId={task.id}
+                                      taskName={task.name}
+                                      elapsedSeconds={task.elapsedSeconds}
+                                      isRunning={runningTaskId === task.id}
+                                    />
+                                  </div>
+                                ))}
+                              </AnimatePresence>
+                              {group.tasks.length === 0 && (
+                                <div className="text-center py-6 bg-muted/10 rounded-lg border border-dashed">
+                                  <p className="text-xs text-muted-foreground font-medium">
+                                    No tasks in this group.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </Card>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </Card>
+                </div>
               </motion.div>
             );
           })}

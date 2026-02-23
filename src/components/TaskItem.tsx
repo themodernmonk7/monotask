@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { TimerController } from './TimerController';
 import { cn } from '@/lib/utils';
-import { useApp } from '../context/AppContext';
+import { useApp } from '@/hooks/useApp';
 import { Trash2, Check, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

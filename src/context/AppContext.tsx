@@ -1,13 +1,12 @@
 import {
   createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
   useRef,
 } from 'react';
-import type { Group, CompletedTask, Note } from '../types';
+import type { Group, CompletedTask, NoteGroup } from '../types';
 import * as storage from '../lib/storage';
 import {
   getRunningTaskId,
@@ -20,12 +19,14 @@ interface AppContextValue {
   groups: Group[];
   runningTaskId: string | null;
   completedTasks: CompletedTask[];
-  notes: Note[];
+  noteGroups: NoteGroup[];
 
   addGroup: (name: string) => void;
   removeGroup: (groupId: string) => void;
+  reorderGroups: (startIndex: number, endIndex: number) => void;
   toggleGroupExpanded: (groupId: string) => void;
   addTask: (groupId: string, name: string) => void;
+  reorderTasks: (groupId: string, startIndex: number, endIndex: number) => void;
   updateTaskElapsed: (
     groupId: string,
     taskId: string,
@@ -36,16 +37,20 @@ interface AppContextValue {
   startTask: (groupId: string, taskId: string) => void;
   pauseTask: () => void;
   markTaskDone: (groupId: string, taskId: string) => void;
-  addNote: (text: string) => void;
-  toggleNote: (noteId: string) => void;
-  updateNote: (noteId: string, text: string) => void;
-  removeNote: (noteId: string) => void;
+
+  addNoteGroup: (title: string) => void;
+  updateNoteGroupTitle: (groupId: string, title: string) => void;
+  removeNoteGroup: (groupId: string) => void;
+  addNote: (groupId: string, text: string) => void;
+  toggleNote: (groupId: string, noteId: string) => void;
+  updateNote: (groupId: string, noteId: string, text: string) => void;
+  removeNote: (groupId: string, noteId: string) => void;
 
   updateCompletedTaskName: (completedTaskId: string, name: string) => void;
   updateCompletedTask: (completedTaskId: string, totalSeconds: number) => void;
 }
 
-const AppContext = createContext<AppContextValue | null>(null);
+export const AppContext = createContext<AppContextValue | null>(null);
 
 function generateId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -61,9 +66,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [completedTasks, setCompletedTasks] = useState<CompletedTask[]>(() =>
     storage.getCompletedTasks(),
   );
-  const [notes, setNotes] = useState<Note[]>(() => storage.getNotes());
+  const [noteGroups, setNoteGroups] = useState<NoteGroup[]>(() => {
+    const groups = storage.getNoteGroups();
+    if (groups.length === 0) {
+      return [{ id: 'general', title: 'General', notes: [] }];
+    }
+    return groups;
+  });
 
-  // Handle persistence and gap calculation on load
   useEffect(() => {
     const runningId = getRunningTaskId();
     const lastActive = getLastActiveTimestamp();
@@ -83,34 +93,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       }
     }
-  }, []); // Run once on mount
+  }, []);
 
-  // Persist groups
   useEffect(() => {
     storage.setGroupsToStorage(groups);
   }, [groups]);
 
-  // Persist completed tasks
   useEffect(() => {
     storage.setCompletedTasks(completedTasks);
   }, [completedTasks]);
 
-  // Persist notes
   useEffect(() => {
-    storage.setNotes(notes);
-  }, [notes]);
+    storage.setNoteGroups(noteGroups);
+    if (localStorage.getItem('monotask-notes')) {
+      localStorage.removeItem('monotask-notes');
+    }
+  }, [noteGroups]);
 
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const baseSecondsRef = useRef<number>(0);
   const groupsRef = useRef(groups);
 
-  // Keep groupsRef in sync
   useEffect(() => {
     groupsRef.current = groups;
   }, [groups]);
-
-  // Global timer: tick every second for the running task
   useEffect(() => {
     if (!runningTaskId) {
       if (timerRef.current) cancelAnimationFrame(timerRef.current);
@@ -118,7 +125,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Capture the state when we start/resume
     const task = groupsRef.current
       .flatMap((g) => g.tasks)
       .find((t) => t.id === runningTaskId);
@@ -134,7 +140,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const elapsedSinceStart = Math.floor((now - startTimeRef.current) / 1000);
       const totalElapsed = baseSecondsRef.current + elapsedSinceStart;
 
-      // Update state only when the second changes to avoid unnecessary re-renders
       if (totalElapsed !== lastSecondReported) {
         setGroups((prev) =>
           prev.map((g) => ({
@@ -161,8 +166,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addGroup = useCallback((name: string) => {
     setGroups((prev) => [
-      ...prev,
       { id: generateId(), name, tasks: [], expanded: true },
+      ...prev,
     ]);
   }, []);
 
@@ -170,7 +175,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (groupId: string) => {
       setGroups((prev) => prev.filter((g) => g.id !== groupId));
       if (runningTaskId) {
-        const group = groups.find((g) => g.id === groupId);
+        const group = groupsRef.current.find((g) => g.id === groupId);
         const taskInGroup = group?.tasks.some((t) => t.id === runningTaskId);
         if (taskInGroup) {
           setRunningTaskIdState(null);
@@ -179,8 +184,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [runningTaskId, groups],
+    [runningTaskId],
   );
+
+  const reorderGroups = useCallback((startIndex: number, endIndex: number) => {
+    setGroups((prev) => {
+      const result = Array.from(prev);
+      const [removed] = result.splice(startIndex, 1);
+      result.splice(endIndex, 0, removed);
+      return result;
+    });
+  }, []);
 
   const toggleGroupExpanded = useCallback((groupId: string) => {
     setGroups((prev) =>
@@ -203,6 +217,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ),
     );
   }, []);
+
+  const reorderTasks = useCallback(
+    (groupId: string, startIndex: number, endIndex: number) => {
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id !== groupId) return g;
+          const newTasks = Array.from(g.tasks);
+          const [removed] = newTasks.splice(startIndex, 1);
+          newTasks.splice(endIndex, 0, removed);
+          return { ...g, tasks: newTasks };
+        }),
+      );
+    },
+    [],
+  );
 
   const updateTaskElapsed = useCallback(
     (groupId: string, taskId: string, elapsedSeconds: number) => {
@@ -272,7 +301,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const markTaskDone = useCallback(
     (groupId: string, taskId: string) => {
-      const group = groups.find((g) => g.id === groupId);
+      const group = groupsRef.current.find((g) => g.id === groupId);
       const task = group?.tasks.find((t) => t.id === taskId);
       if (!group || !task) return;
       if (runningTaskId === taskId) {
@@ -298,7 +327,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ),
       );
     },
-    [groups, runningTaskId],
+    [runningTaskId],
   );
 
   const updateCompletedTaskName = useCallback(
@@ -323,22 +352,74 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const addNote = useCallback((text: string) => {
-    setNotes((prev) => [{ id: generateId(), text, checked: false }, ...prev]);
+  const addNoteGroup = useCallback((title: string) => {
+    setNoteGroups((prev) => [...prev, { id: generateId(), title, notes: [] }]);
   }, []);
 
-  const toggleNote = useCallback((noteId: string) => {
-    setNotes((prev) =>
-      prev.map((n) => (n.id === noteId ? { ...n, checked: !n.checked } : n)),
+  const updateNoteGroupTitle = useCallback((groupId: string, title: string) => {
+    setNoteGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, title } : g)),
     );
   }, []);
 
-  const updateNote = useCallback((noteId: string, text: string) => {
-    setNotes((prev) => prev.map((n) => (n.id === noteId ? { ...n, text } : n)));
+  const removeNoteGroup = useCallback((groupId: string) => {
+    setNoteGroups((prev) => prev.filter((g) => g.id !== groupId));
   }, []);
 
-  const removeNote = useCallback((noteId: string) => {
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+  const addNote = useCallback((groupId: string, text: string) => {
+    setNoteGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              notes: [{ id: generateId(), text, checked: false }, ...g.notes],
+            }
+          : g,
+      ),
+    );
+  }, []);
+
+  const toggleNote = useCallback((groupId: string, noteId: string) => {
+    setNoteGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              notes: g.notes.map((n) =>
+                n.id === noteId ? { ...n, checked: !n.checked } : n,
+              ),
+            }
+          : g,
+      ),
+    );
+  }, []);
+
+  const updateNote = useCallback(
+    (groupId: string, noteId: string, text: string) => {
+      setNoteGroups((prev) =>
+        prev.map((g) =>
+          g.id === groupId
+            ? {
+                ...g,
+                notes: g.notes.map((n) =>
+                  n.id === noteId ? { ...n, text } : n,
+                ),
+              }
+            : g,
+        ),
+      );
+    },
+    [],
+  );
+
+  const removeNote = useCallback((groupId: string, noteId: string) => {
+    setNoteGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, notes: g.notes.filter((n) => n.id !== noteId) }
+          : g,
+      ),
+    );
   }, []);
 
   const value = useMemo<AppContextValue>(
@@ -346,11 +427,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groups,
       runningTaskId,
       completedTasks,
-      notes,
+      noteGroups,
       addGroup,
       removeGroup,
+      reorderGroups,
       toggleGroupExpanded,
       addTask,
+      reorderTasks,
       updateTaskElapsed,
       updateTaskName,
       removeTask,
@@ -359,6 +442,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       markTaskDone,
       updateCompletedTaskName,
       updateCompletedTask,
+      addNoteGroup,
+      updateNoteGroupTitle,
+      removeNoteGroup,
       addNote,
       toggleNote,
       updateNote,
@@ -368,11 +454,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groups,
       runningTaskId,
       completedTasks,
-      notes,
+      noteGroups,
       addGroup,
       removeGroup,
+      reorderGroups,
       toggleGroupExpanded,
       addTask,
+      reorderTasks,
       updateTaskElapsed,
       updateTaskName,
       removeTask,
@@ -381,6 +469,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       markTaskDone,
       updateCompletedTaskName,
       updateCompletedTask,
+      addNoteGroup,
+      updateNoteGroupTitle,
+      removeNoteGroup,
       addNote,
       toggleNote,
       updateNote,
@@ -389,10 +480,4 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
-}
-
-export function useApp() {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useApp must be used within AppProvider');
-  return ctx;
 }

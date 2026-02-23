@@ -1,5 +1,5 @@
 import { Play, Pause, Check } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { useApp } from '@/hooks/useApp';
 import { TimerDisplay } from './TimerDisplay';
 import { Button } from '@/components/ui/button';
 import { motion, AnimatePresence } from 'motion/react';
