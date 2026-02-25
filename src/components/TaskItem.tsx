@@ -110,7 +110,7 @@ export function TaskItem({
           <div className="flex items-center gap-2 flex-1 min-w-0 group/name">
             <p
               className={cn(
-                'font-semibold tracking-tight truncate transition-colors cursor-text text-wrap',
+                'font-semibold tracking-tight truncate transition-colors cursor-text text-wrap break-all',
                 isRunning
                   ? 'text-primary'
                   : 'text-foreground/90 group-hover/task:text-foreground',
@@ -131,7 +131,7 @@ export function TaskItem({
         )}
       </div>
 
-      <div className="flex items-center justify-between md:justify-end gap-3 relative z-10 w-full md:w-auto">
+      <div className="flex items-center justify-between md:justify-end gap-3 relative z-10 w-full md:w-fit shrink-0">
         <TimerController
           groupId={groupId}
           taskId={taskId}
