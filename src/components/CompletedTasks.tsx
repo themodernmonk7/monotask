@@ -14,11 +14,13 @@ import {
   Pencil,
   History,
   CheckCircle2,
+  Download,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useApp } from '@/hooks/useApp';
+import { downloadCompletedTasksCSV } from '@/lib/csvExport';
 
 function groupByGroupName(
   tasks: CompletedTask[],
@@ -234,7 +236,7 @@ export function CompletedTasks() {
                     key={groupName}
                     className="overflow-hidden border-border/40 shadow-sm bg-card/50 gap-4 py-4 pt-0"
                   >
-                    <div className="p-4 bg-muted/20 border-b border-border/40 flex justify-between items-center">
+                    <div className="p-4 bg-muted/20 border-b border-border/40 flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <FolderOpen className="w-3.5 h-3.5" />
                         <span className="text-xs font-bold uppercase tracking-wider">
@@ -244,12 +246,29 @@ export function CompletedTasks() {
                           {groupTasks.length}
                         </span>
                       </div>
-                      <p className="text-xs font-bold tracking-wider capitalize">
-                        Total time:
-                        <span className="font-mono text-sm text-muted-foreground tabular-nums ml-2">
-                          {formatDuration(totalGroupSeconds)}
-                        </span>
-                      </p>
+                      <div className="flex items-center gap-3">
+                        <p className="text-xs font-bold tracking-wider capitalize">
+                          Total time:
+                          <span className="font-mono text-sm text-muted-foreground tabular-nums ml-2">
+                            {formatDuration(totalGroupSeconds)}
+                          </span>
+                        </p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs font-medium text-primary hover:bg-primary/10"
+                          onClick={() =>
+                            downloadCompletedTasksCSV(
+                              groupTasks,
+                              `tasks_${groupName.replace(/[^a-zA-Z0-9-_]/g, '_')}_${dateKey}.csv`,
+                            )
+                          }
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Export Tasks
+                        </Button>
+                      </div>
                     </div>
                     <CardContent className="p-0">
                       <ul className="divide-y divide-border/20">

@@ -19,6 +19,7 @@
     "motion": "^12.34.3",
     "radix-ui": "^1.4.3",
     "react": "^19.2.0",
+    "react-csv": "^2.2.2",
     "react-dom": "^19.2.0",
     "shadcn": "^3.8.5",
     "tailwind-merge": "^3.5.0",

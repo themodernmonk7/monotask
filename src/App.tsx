@@ -1,27 +1,34 @@
-import { useState, useEffect } from "react"
-import { motion, AnimatePresence } from "motion/react"
-import { AppProvider } from "./context/AppContext"
-import { GroupList } from "./components/GroupList"
-import { CompletedTasks } from "./components/CompletedTasks"
-import { NotesSection } from "./components/NotesSection"
-import { ListTodo, CheckSquare, StickyNote } from "lucide-react"
-import { cn } from "./lib/utils"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { AppProvider } from './context/AppContext';
+import { GroupList } from './components/GroupList';
+import { CompletedTasks } from './components/CompletedTasks';
+import { NotesSection } from './components/NotesSection';
+import { ListTodo, CheckSquare, StickyNote } from 'lucide-react';
+import { cn } from './lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ProfileCard from './components/profile-card';
 
-type TabId = "tasks" | "completed" | "notes"
+type TabId = 'tasks' | 'completed' | 'notes';
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "tasks", label: "Tasks", icon: <ListTodo className="w-4 h-4" /> },
-  { id: "completed", label: "Completed", icon: <CheckSquare className="w-4 h-4" /> },
-  { id: "notes", label: "Notes", icon: <StickyNote className="w-4 h-4" /> },
-]
+  { id: 'tasks', label: 'Tasks', icon: <ListTodo className="w-4 h-4" /> },
+  {
+    id: 'completed',
+    label: 'Completed',
+    icon: <CheckSquare className="w-4 h-4" />,
+  },
+  { id: 'notes', label: 'Notes', icon: <StickyNote className="w-4 h-4" /> },
+];
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState<TabId>("tasks")
+  const [activeTab, setActiveTab] = useState<TabId>('tasks');
 
   useEffect(() => {
-    document.documentElement.classList.add("dark")
-  }, [])
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  console.log(<ProfileCard name="saurav" role="admin" />);
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-500 font-sans">
@@ -43,14 +50,22 @@ function AppContent() {
           </div>
           <div className="flex items-center gap-3">
             <div className=" px-3 py-1 rounded-full bg-primary/10 border border-primary/20 flex justify-center items-center">
-              <span className="text-[10px] font-bold text-primary uppercase tracking-wider">Deep Work</span>
+              <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
+                Deep Work
+              </span>
             </div>
           </div>
         </div>
       </header>
 
+      <ProfileCard name="saurav" role="admin" />
+
       <main className="relative z-10 max-w-2xl mx-auto px-6 py-8">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as TabId)}
+          className="w-full"
+        >
           <TabsList className="grid w-full grid-cols-3 mb-8 bg-muted/50 rounded-xl h-11">
             {TABS.map((tab) => (
               <TabsTrigger
@@ -59,10 +74,14 @@ function AppContent() {
                 className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all duration-200"
               >
                 <div className="flex items-center gap-2">
-                  <span className={cn(
-                    "transition-transform duration-200",
-                    activeTab === tab.id ? "scale-110" : "scale-100 opacity-70"
-                  )}>
+                  <span
+                    className={cn(
+                      'transition-transform duration-200',
+                      activeTab === tab.id
+                        ? 'scale-110'
+                        : 'scale-100 opacity-70',
+                    )}
+                  >
                     {tab.icon}
                   </span>
                   <span className="text-sm font-medium">{tab.label}</span>
@@ -77,9 +96,9 @@ function AppContent() {
               initial={{ opacity: 0, y: 10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.98 }}
-              transition={{ 
-                duration: 0.3, 
-                ease: [0.23, 1, 0.32, 1] 
+              transition={{
+                duration: 0.3,
+                ease: [0.23, 1, 0.32, 1],
               }}
             >
               <TabsContent value="tasks" className="mt-0 outline-none">
@@ -96,7 +115,7 @@ function AppContent() {
         </Tabs>
       </main>
     </div>
-  )
+  );
 }
 
 function App() {
@@ -104,7 +123,7 @@ function App() {
     <AppProvider>
       <AppContent />
     </AppProvider>
-  )
+  );
 }
 
-export default App
+export default App;
