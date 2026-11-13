@@ -6,6 +6,8 @@ import {
   getWeeklyReportData,
   getMonthlyReportData,
   formatDurationHuman,
+  calculateStreak,
+  comparePeriods,
 } from '@/lib/analytics';
 import {
   ChevronLeft,
@@ -15,11 +17,16 @@ import {
   Ticket,
   Clock,
   Calendar,
+  Flame,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CsvExportDialog } from './CsvExportDialog';
+import { SessionList } from './SessionList';
 import {
   format,
   addDays,
@@ -28,6 +35,8 @@ import {
   subWeeks,
   addMonths,
   subMonths,
+  startOfWeek,
+  endOfWeek,
 } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -61,6 +70,19 @@ export function ReportsView() {
   const dailyData = useMemo(() => {
     return getDailyReportData(allSessions, currentDate, settings);
   }, [allSessions, currentDate, settings]);
+
+  const streak = useMemo(
+    () => calculateStreak(allSessions, settings),
+    [allSessions, settings],
+  );
+
+  const weekComparison = useMemo(() => {
+    const thisStart = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const thisEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+    const lastStart = subWeeks(thisStart, 1);
+    const lastEnd = subWeeks(thisEnd, 1);
+    return comparePeriods(allSessions, thisStart, thisEnd, lastStart, lastEnd);
+  }, [allSessions, currentDate]);
 
   const weeklyData = useMemo(() => {
     return getWeeklyReportData(allSessions, currentDate, settings);
@@ -152,6 +174,77 @@ export function ReportsView() {
         </Button>
       </div>
 
+      {/* Streak + week-over-week momentum */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Card className="bg-card/40 border-white/5 p-4 flex items-center gap-3">
+          <span
+            className={cn(
+              'w-10 h-10 rounded-xl flex items-center justify-center border shrink-0',
+              streak.current > 0
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                : 'bg-muted/30 border-white/5 text-muted-foreground',
+            )}
+          >
+            <Flame
+              className={cn('w-5 h-5', streak.current > 0 && 'fill-current')}
+            />
+          </span>
+          <div className="min-w-0">
+            <p className="font-mono text-xl font-bold text-foreground leading-tight">
+              {streak.current}{' '}
+              <span className="text-sm font-sans font-medium text-muted-foreground">
+                day{streak.current === 1 ? '' : 's'}
+              </span>
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {streak.current > 0
+                ? `Target streak · best ${streak.longest}`
+                : 'Hit your daily target to start a streak'}
+            </p>
+          </div>
+        </Card>
+
+        <Card className="bg-card/40 border-white/5 p-4 flex items-center gap-3">
+          {(() => {
+            const up = weekComparison.deltaSeconds > 0;
+            const flat = weekComparison.deltaSeconds === 0;
+            const Icon = flat ? Minus : up ? TrendingUp : TrendingDown;
+            return (
+              <>
+                <span
+                  className={cn(
+                    'w-10 h-10 rounded-xl flex items-center justify-center border shrink-0',
+                    flat
+                      ? 'bg-muted/30 border-white/5 text-muted-foreground'
+                      : up
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-sky-500/10 border-sky-500/30 text-sky-400',
+                  )}
+                >
+                  <Icon className="w-5 h-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-mono text-xl font-bold text-foreground leading-tight">
+                    {flat
+                      ? '—'
+                      : `${up ? '+' : '−'}${formatDurationHuman(
+                          Math.abs(weekComparison.deltaSeconds),
+                        )}`}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    vs last week
+                    {weekComparison.percentChange !== null &&
+                      ` · ${weekComparison.percentChange > 0 ? '+' : ''}${
+                        weekComparison.percentChange
+                      }%`}
+                  </p>
+                </div>
+              </>
+            );
+          })()}
+        </Card>
+      </div>
+
       {/* Views Container */}
       <AnimatePresence mode="wait">
         {activeTab === 'daily' && (
@@ -181,7 +274,8 @@ export function ReportsView() {
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Target vs Actual
                 </span>
-                <p className="font-mono text-xl md:text-2xl font-bold text-foreground truncate">
+                {/* No truncate here: "7h / 12m 28s" would clip to "7h / 1…" */}
+                <p className="font-mono text-lg md:text-xl font-bold text-foreground leading-tight break-words">
                   {formatDurationHuman(dailyData.targetSeconds)} /{' '}
                   <span className="text-primary">
                     {formatDurationHuman(dailyData.totalWorkingSeconds)}
@@ -347,6 +441,8 @@ export function ReportsView() {
                 </Card>
               </>
             )}
+
+            <SessionList date={currentDate} />
           </motion.div>
         )}
 

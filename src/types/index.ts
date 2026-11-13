@@ -1,14 +1,48 @@
+/** Fixed palette so tag colours stay consistent and theme-safe. */
+export const TAG_COLORS = [
+  'slate',
+  'red',
+  'amber',
+  'emerald',
+  'sky',
+  'violet',
+  'pink',
+] as const;
+
+export type TagColor = (typeof TAG_COLORS)[number];
+
+/**
+ * A tag from the user's shared library. Tasks reference these by id so one tag
+ * can be reused across any number of tasks.
+ */
+export interface Tag {
+  id: string;
+  label: string;
+  color: TagColor;
+}
+
 export interface Task {
   id: string;
   name: string;
   elapsedSeconds: number;
+  description?: string;
+  tagIds?: string[];
+  /**
+   * @deprecated Tags used to be embedded per task. Hoisted into the shared
+   * library on load; kept only so that migration can read old records.
+   */
+  tags?: Tag[];
 }
+
+/** At most this many groups may be pinned at once. */
+export const MAX_PINNED_GROUPS = 2;
 
 export interface Group {
   id: string;
   name: string;
   tasks: Task[];
   expanded?: boolean;
+  pinned?: boolean;
 }
 
 export interface CompletedTask {
