@@ -7,8 +7,14 @@ export interface AuthContextValue {
   session: Session | null;
   loading: boolean;
   isConfigured: boolean;
+  /** The name given at sign-up, falling back to the email local-part. */
+  displayName: string | null;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
-  signUp: (email: string, password: string) => Promise<{ error: AuthError | null; data?: unknown }>;
+  signUp: (
+    email: string,
+    password: string,
+    fullName: string,
+  ) => Promise<{ error: AuthError | null; data?: unknown }>;
   signInWithOtp: (email: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<{ error: AuthError | null }>;
 }
@@ -52,13 +58,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    return { data, error };
-  }, []);
+  const signUp = useCallback(
+    async (email: string, password: string, fullName: string) => {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName } },
+      });
+      return { data, error };
+    },
+    [],
+  );
 
   const signInWithOtp = useCallback(async (email: string) => {
     const { error } = await supabase.auth.signInWithOtp({
@@ -75,18 +85,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   }, []);
 
+  const displayName = useMemo<string | null>(() => {
+    if (!user) return null;
+    const metadata = user.user_metadata as { full_name?: unknown } | undefined;
+    const fromMetadata =
+      typeof metadata?.full_name === 'string' ? metadata.full_name.trim() : '';
+    if (fromMetadata) return fromMetadata;
+    return user.email?.split('@')[0] ?? null;
+  }, [user]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       session,
       loading,
       isConfigured: isSupabaseConfigured,
+      displayName,
       signIn,
       signUp,
       signInWithOtp,
       signOut,
     }),
-    [user, session, loading, signIn, signUp, signInWithOtp, signOut]
+    [user, session, loading, displayName, signIn, signUp, signInWithOtp, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

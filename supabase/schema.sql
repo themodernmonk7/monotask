@@ -1,5 +1,12 @@
 -- Monotask Database Schema for Supabase
 -- Run this in your Supabase SQL Editor: Dashboard -> SQL Editor -> New Query
+--
+-- This script is safe to run as many times as you like. Tables use
+-- IF NOT EXISTS, and every policy is dropped before being recreated because
+-- Postgres has no CREATE POLICY IF NOT EXISTS.
+--
+-- Every table is scoped by user_id and protected by Row Level Security, so one
+-- database serves any number of users while each only ever sees their own rows.
 
 -- 1. User Settings Table
 CREATE TABLE IF NOT EXISTS public.user_settings (
@@ -12,8 +19,9 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
 
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own settings" ON public.user_settings;
 CREATE POLICY "Users can manage own settings" ON public.user_settings
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- 2. Groups Table
 CREATE TABLE IF NOT EXISTS public.groups (
@@ -22,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.groups (
   name TEXT NOT NULL,
   tasks JSONB NOT NULL DEFAULT '[]'::jsonb,
   expanded BOOLEAN NOT NULL DEFAULT true,
+  pinned BOOLEAN NOT NULL DEFAULT false,
   order_index INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -30,8 +39,9 @@ CREATE TABLE IF NOT EXISTS public.groups (
 
 ALTER TABLE public.groups ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own groups" ON public.groups;
 CREATE POLICY "Users can manage own groups" ON public.groups
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- 3. Completed Tasks Table
 CREATE TABLE IF NOT EXISTS public.completed_tasks (
@@ -51,8 +61,9 @@ CREATE TABLE IF NOT EXISTS public.completed_tasks (
 
 ALTER TABLE public.completed_tasks ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own completed tasks" ON public.completed_tasks;
 CREATE POLICY "Users can manage own completed tasks" ON public.completed_tasks
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- 4. Work Sessions Table
 CREATE TABLE IF NOT EXISTS public.work_sessions (
@@ -73,8 +84,9 @@ CREATE TABLE IF NOT EXISTS public.work_sessions (
 
 ALTER TABLE public.work_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own work sessions" ON public.work_sessions;
 CREATE POLICY "Users can manage own work sessions" ON public.work_sessions
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- 5. Note Groups Table
 CREATE TABLE IF NOT EXISTS public.note_groups (
@@ -89,8 +101,9 @@ CREATE TABLE IF NOT EXISTS public.note_groups (
 
 ALTER TABLE public.note_groups ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own note groups" ON public.note_groups;
 CREATE POLICY "Users can manage own note groups" ON public.note_groups
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- 6. User Active State (for persistent active timer across devices)
 CREATE TABLE IF NOT EXISTS public.user_active_state (
@@ -103,5 +116,28 @@ CREATE TABLE IF NOT EXISTS public.user_active_state (
 
 ALTER TABLE public.user_active_state ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own active state" ON public.user_active_state;
 CREATE POLICY "Users can manage own active state" ON public.user_active_state
-  FOR ALL USING (auth.uid() = user_id);
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- 7. Tags (shared per-user tag library; tasks reference these by id)
+CREATE TABLE IF NOT EXISTS public.tags (
+  id TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT 'sky',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  PRIMARY KEY (id, user_id)
+);
+
+ALTER TABLE public.tags ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage own tags" ON public.tags;
+CREATE POLICY "Users can manage own tags" ON public.tags
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
+-- Migrations for databases created before a column existed. Safe to re-run.
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+-- END MONOTASK MIGRATIONS

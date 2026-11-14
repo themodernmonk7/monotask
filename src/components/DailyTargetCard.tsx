@@ -10,6 +10,7 @@ import {
   Flame,
   Sparkles,
   Radio,
+  ArrowDownToLine,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,15 +18,18 @@ import { Card, CardContent } from '@/components/ui/card';
 import { SettingsDialog } from './SettingsDialog';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { requestRevealTask } from '@/lib/uiEvents';
 
 export function DailyTargetCard() {
   const { todayProgress, runningTaskId, groups } = useApp();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const runningTask = runningTaskId
-    ? groups.flatMap((g) => g.tasks.map((t) => ({ ...t, groupName: g.name }))).find(
-        (t) => t.id === runningTaskId
-      )
+    ? groups
+        .flatMap((g) =>
+          g.tasks.map((t) => ({ ...t, groupName: g.name, groupId: g.id })),
+        )
+        .find((t) => t.id === runningTaskId)
     : null;
 
   const todayStr = format(new Date(), 'EEEE, MMM d');
@@ -235,9 +239,19 @@ export function DailyTargetCard() {
             </div>
           </div>
 
-          {/* Live Running Indicator */}
+          {/* Live Running Indicator — click to jump to the task */}
           {runningTask && (
-            <div className="flex items-center justify-between text-xs bg-primary/10 border border-primary/20 rounded-xl px-3 py-2 text-primary">
+            <button
+              type="button"
+              onClick={() =>
+                requestRevealTask({
+                  taskId: runningTask.id,
+                  groupId: runningTask.groupId,
+                })
+              }
+              title="Jump to this task"
+              className="w-full flex items-center justify-between text-xs bg-primary/10 border border-primary/20 rounded-xl px-3 py-2 text-primary cursor-pointer transition-colors hover:bg-primary/15 hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
               <div className="flex items-center gap-2 truncate min-w-0">
                 <Radio className="w-3.5 h-3.5 animate-pulse shrink-0" />
                 <span className="text-muted-foreground text-[11px]">Tracking:</span>
@@ -248,10 +262,11 @@ export function DailyTargetCard() {
                   ({runningTask.groupName})
                 </span>
               </div>
-              <span className="font-mono font-bold tabular-nums ml-2 shrink-0">
-                Live
+              <span className="flex items-center gap-1.5 ml-2 shrink-0">
+                <span className="font-mono font-bold tabular-nums">Live</span>
+                <ArrowDownToLine className="w-3.5 h-3.5 opacity-70" />
               </span>
-            </div>
+            </button>
           )}
         </CardContent>
       </Card>

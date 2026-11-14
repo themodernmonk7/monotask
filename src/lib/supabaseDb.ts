@@ -5,28 +5,108 @@ import type {
   WorkSession,
   NoteGroup,
   AppSettings,
+  Tag,
+  TagColor,
 } from '@/types';
+import { TAG_COLORS } from '@/types';
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  dailyTargetMinutes: 420, // 7 hours
+  workingDays: [1, 2, 3, 4, 5], // Monday - Friday
+};
+
+/** Every write returns its failure instead of swallowing it, so callers can roll back. */
+export type PersistResult = { error: string | null };
+
+export interface ActiveState {
+  runningTaskId: string | null;
+  lastActiveTimestamp: number | null;
+  activeSessionStart: number | null;
+}
 
 export interface UserDbData {
   groups: Group[];
   completedTasks: CompletedTask[];
   sessions: WorkSession[];
   noteGroups: NoteGroup[];
-  settings: AppSettings | null;
-  activeState: {
-    runningTaskId: string | null;
-    lastActiveTimestamp: number | null;
-    activeSessionStart: number | null;
-  } | null;
+  tags: Tag[];
+  settings: AppSettings;
+  activeState: ActiveState | null;
+}
+
+type SupabaseErrorLike = { message?: string; code?: string } | null;
+
+function isMissingTable(error: SupabaseErrorLike): boolean {
+  if (!error) return false;
+  const msg = error.message || '';
+  return (
+    error.code === '42P01' ||
+    error.code === 'PGRST204' ||
+    error.code === 'PGRST205' ||
+    msg.includes('does not exist') ||
+    msg.includes('schema cache')
+  );
 }
 
 /**
- * Fetch all user data from Supabase
+ * A dropped connection usually rejects fast, but a captive portal or a stalled
+ * socket can leave the request pending forever — which is what leaves the app
+ * stuck on a loading spinner. Cap it so the caller can fall back to the cache.
+ */
+const FETCH_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(work: Promise<T>, fallback: T): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<T>((resolve) =>
+      setTimeout(() => resolve(fallback), FETCH_TIMEOUT_MS),
+    ),
+  ]);
+}
+
+function toMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function normalizeSettings(raw: {
+  daily_target_minutes?: unknown;
+  working_days?: unknown;
+}): AppSettings {
+  return {
+    dailyTargetMinutes:
+      typeof raw.daily_target_minutes === 'number' && raw.daily_target_minutes > 0
+        ? raw.daily_target_minutes
+        : DEFAULT_SETTINGS.dailyTargetMinutes,
+    workingDays: Array.isArray(raw.working_days)
+      ? (raw.working_days as number[])
+      : DEFAULT_SETTINGS.workingDays,
+  };
+}
+
+/**
+ * Read the user's entire dataset in one round trip.
+ * This is the only read path — Supabase is the source of truth.
  */
 export async function fetchUserData(userId: string): Promise<{
   data: UserDbData | null;
   error: string | null;
-  tablesMissing?: boolean;
+  tablesMissing: boolean;
+}> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { data: null, error: 'Network error: offline', tablesMissing: false };
+  }
+
+  return withTimeout(fetchUserDataInner(userId), {
+    data: null,
+    error: 'Network error: the request timed out',
+    tablesMissing: false,
+  });
+}
+
+async function fetchUserDataInner(userId: string): Promise<{
+  data: UserDbData | null;
+  error: string | null;
+  tablesMissing: boolean;
 }> {
   try {
     const [
@@ -34,37 +114,41 @@ export async function fetchUserData(userId: string): Promise<{
       completedRes,
       sessionsRes,
       notesRes,
+      tagsRes,
       settingsRes,
       activeRes,
     ] = await Promise.all([
-      supabase.from('groups').select('*').eq('user_id', userId).order('order_index'),
-      supabase.from('completed_tasks').select('*').eq('user_id', userId).order('completed_at', { ascending: false }),
-      supabase.from('work_sessions').select('*').eq('user_id', userId).order('start_time', { ascending: false }),
-      supabase.from('note_groups').select('*').eq('user_id', userId).order('order_index'),
-      supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
-      supabase.from('user_active_state').select('*').eq('user_id', userId).maybeSingle(),
-    ]);
+        supabase.from('groups').select('*').eq('user_id', userId).order('order_index'),
+        supabase
+          .from('completed_tasks')
+          .select('*')
+          .eq('user_id', userId)
+          .order('completed_at', { ascending: false }),
+        supabase
+          .from('work_sessions')
+          .select('*')
+          .eq('user_id', userId)
+          .order('start_time', { ascending: false }),
+        supabase.from('note_groups').select('*').eq('user_id', userId).order('order_index'),
+        supabase.from('tags').select('*').eq('user_id', userId).order('created_at'),
+        supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
+        supabase.from('user_active_state').select('*').eq('user_id', userId).maybeSingle(),
+      ]);
 
-    // Check if any error indicates missing tables
-    const anyError =
+    const firstError =
       groupsRes.error ||
       completedRes.error ||
       sessionsRes.error ||
       notesRes.error ||
-      settingsRes.error;
+      tagsRes.error ||
+      settingsRes.error ||
+      activeRes.error;
 
-    if (anyError) {
-      const msg = anyError.message || '';
-      const isMissingTable =
-        msg.includes('does not exist') ||
-        msg.includes('schema cache') ||
-        anyError.code === '42P01' ||
-        anyError.code === 'PGRST204';
-
+    if (firstError) {
       return {
         data: null,
-        error: anyError.message,
-        tablesMissing: isMissingTable,
+        error: firstError.message,
+        tablesMissing: isMissingTable(firstError),
       };
     }
 
@@ -73,6 +157,7 @@ export async function fetchUserData(userId: string): Promise<{
       name: row.name,
       tasks: Array.isArray(row.tasks) ? row.tasks : [],
       expanded: row.expanded ?? true,
+      pinned: row.pinned ?? false,
     }));
 
     const completedTasks: CompletedTask[] = (completedRes.data || []).map((row) => ({
@@ -106,28 +191,25 @@ export async function fetchUserData(userId: string): Promise<{
       notes: Array.isArray(row.notes) ? row.notes : [],
     }));
 
-    let settings: AppSettings | null = null;
-    if (settingsRes.data) {
-      settings = {
-        dailyTargetMinutes: settingsRes.data.daily_target_minutes,
-        workingDays: Array.isArray(settingsRes.data.working_days)
-          ? settingsRes.data.working_days
-          : [1, 2, 3, 4, 5],
-      };
-    }
+    const tags: Tag[] = (tagsRes.data || []).map((row) => ({
+      id: row.id,
+      label: row.label,
+      color: (TAG_COLORS as readonly string[]).includes(row.color)
+        ? (row.color as TagColor)
+        : 'slate',
+    }));
 
-    let activeState = null;
-    if (activeRes.data) {
-      activeState = {
-        runningTaskId: activeRes.data.running_task_id || null,
-        lastActiveTimestamp: activeRes.data.last_active_timestamp
-          ? Number(activeRes.data.last_active_timestamp)
-          : null,
-        activeSessionStart: activeRes.data.active_session_start
-          ? Number(activeRes.data.active_session_start)
-          : null,
-      };
-    }
+    const activeState: ActiveState | null = activeRes.data
+      ? {
+          runningTaskId: activeRes.data.running_task_id || null,
+          lastActiveTimestamp: activeRes.data.last_active_timestamp
+            ? Number(activeRes.data.last_active_timestamp)
+            : null,
+          activeSessionStart: activeRes.data.active_session_start
+            ? Number(activeRes.data.active_session_start)
+            : null,
+        }
+      : null;
 
     return {
       data: {
@@ -135,189 +217,184 @@ export async function fetchUserData(userId: string): Promise<{
         completedTasks,
         sessions,
         noteGroups,
-        settings,
+        tags,
+        settings: settingsRes.data
+          ? normalizeSettings(settingsRes.data)
+          : DEFAULT_SETTINGS,
         activeState,
       },
       error: null,
+      tablesMissing: false,
     };
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return { data: null, error: errorMsg };
-  }
-}
-
-/**
- * Upsert user groups
- */
-export async function syncGroupsToSupabase(
-  userId: string,
-  groups: Group[]
-): Promise<void> {
-  try {
-    // Upsert all groups
-    if (groups.length > 0) {
-      const rows = groups.map((g, index) => ({
-        id: g.id,
-        user_id: userId,
-        name: g.name,
-        tasks: g.tasks,
-        expanded: g.expanded ?? true,
-        order_index: index,
-        updated_at: new Date().toISOString(),
-      }));
-      await supabase.from('groups').upsert(rows, { onConflict: 'id,user_id' });
-    }
-
-    // Delete groups no longer in the array
-    const groupIds = groups.map((g) => g.id);
-    if (groupIds.length > 0) {
-      await supabase
-        .from('groups')
-        .delete()
-        .eq('user_id', userId)
-        .not('id', 'in', `(${groupIds.map((id) => `"${id}"`).join(',')})`);
-    } else {
-      await supabase.from('groups').delete().eq('user_id', userId);
-    }
   } catch (err) {
-    console.error('Failed to sync groups to Supabase:', err);
+    return { data: null, error: toMessage(err), tablesMissing: false };
   }
 }
 
 /**
- * Upsert completed tasks
+ * Replace a whole collection for one user: upsert the current rows,
+ * then delete anything the client no longer has. Keeps local deletes
+ * from silently resurrecting on the next load.
  */
-export async function syncCompletedTasksToSupabase(
+async function replaceCollection(
+  table: string,
   userId: string,
-  tasks: CompletedTask[]
-): Promise<void> {
+  rows: Record<string, unknown>[],
+  ids: string[],
+): Promise<PersistResult> {
   try {
-    if (tasks.length > 0) {
-      const rows = tasks.map((t) => ({
-        id: t.id,
-        user_id: userId,
-        task_name: t.taskName,
-        group_name: t.groupName,
-        total_seconds: t.totalSeconds,
-        completed_at: t.completedAt,
-        ticket_id: t.ticketId || null,
-        start_time: t.startTime || null,
-        end_time: t.endTime || null,
-        notes: t.notes || null,
-      }));
-      await supabase.from('completed_tasks').upsert(rows, { onConflict: 'id,user_id' });
+    if (rows.length > 0) {
+      const { error } = await supabase
+        .from(table)
+        .upsert(rows, { onConflict: 'id,user_id' });
+      if (error) return { error: error.message };
     }
+
+    const base = supabase.from(table).delete().eq('user_id', userId);
+    const { error } = ids.length
+      ? await base.not('id', 'in', `(${ids.map((id) => `"${id}"`).join(',')})`)
+      : await base;
+
+    return { error: error ? error.message : null };
   } catch (err) {
-    console.error('Failed to sync completed tasks to Supabase:', err);
+    return { error: toMessage(err) };
   }
 }
 
-/**
- * Upsert work sessions
- */
-export async function syncSessionsToSupabase(
-  userId: string,
-  sessions: WorkSession[]
-): Promise<void> {
-  try {
-    if (sessions.length > 0) {
-      const rows = sessions.map((s) => ({
-        id: s.id,
-        user_id: userId,
-        task_id: s.taskId,
-        task_name: s.taskName,
-        group_name: s.groupName,
-        ticket_id: s.ticketId || null,
-        start_time: s.startTime,
-        end_time: s.endTime,
-        duration_seconds: s.durationSeconds,
-        notes: s.notes || null,
-        completed_task_id: s.completedTaskId || null,
-      }));
-      await supabase.from('work_sessions').upsert(rows, { onConflict: 'id,user_id' });
-    }
-  } catch (err) {
-    console.error('Failed to sync work sessions to Supabase:', err);
-  }
+export function persistGroups(userId: string, groups: Group[]): Promise<PersistResult> {
+  return replaceCollection(
+    'groups',
+    userId,
+    groups.map((g, index) => ({
+      id: g.id,
+      user_id: userId,
+      name: g.name,
+      tasks: g.tasks,
+      expanded: g.expanded ?? true,
+      pinned: g.pinned ?? false,
+      order_index: index,
+      updated_at: new Date().toISOString(),
+    })),
+    groups.map((g) => g.id),
+  );
 }
 
-/**
- * Upsert note groups
- */
-export async function syncNoteGroupsToSupabase(
+export function persistCompletedTasks(
   userId: string,
-  noteGroups: NoteGroup[]
-): Promise<void> {
-  try {
-    if (noteGroups.length > 0) {
-      const rows = noteGroups.map((g, index) => ({
-        id: g.id,
-        user_id: userId,
-        title: g.title,
-        notes: g.notes,
-        order_index: index,
-      }));
-      await supabase.from('note_groups').upsert(rows, { onConflict: 'id,user_id' });
-    }
-
-    const ids = noteGroups.map((g) => g.id);
-    if (ids.length > 0) {
-      await supabase
-        .from('note_groups')
-        .delete()
-        .eq('user_id', userId)
-        .not('id', 'in', `(${ids.map((id) => `"${id}"`).join(',')})`);
-    } else {
-      await supabase.from('note_groups').delete().eq('user_id', userId);
-    }
-  } catch (err) {
-    console.error('Failed to sync note groups to Supabase:', err);
-  }
+  tasks: CompletedTask[],
+): Promise<PersistResult> {
+  return replaceCollection(
+    'completed_tasks',
+    userId,
+    tasks.map((t) => ({
+      id: t.id,
+      user_id: userId,
+      task_name: t.taskName,
+      group_name: t.groupName,
+      total_seconds: t.totalSeconds,
+      completed_at: t.completedAt,
+      ticket_id: t.ticketId || null,
+      start_time: t.startTime || null,
+      end_time: t.endTime || null,
+      notes: t.notes || null,
+    })),
+    tasks.map((t) => t.id),
+  );
 }
 
-/**
- * Upsert user settings
- */
-export async function syncSettingsToSupabase(
+export function persistSessions(
   userId: string,
-  settings: AppSettings
-): Promise<void> {
+  sessions: WorkSession[],
+): Promise<PersistResult> {
+  return replaceCollection(
+    'work_sessions',
+    userId,
+    sessions.map((s) => ({
+      id: s.id,
+      user_id: userId,
+      task_id: s.taskId,
+      task_name: s.taskName,
+      group_name: s.groupName,
+      ticket_id: s.ticketId || null,
+      start_time: s.startTime,
+      end_time: s.endTime,
+      duration_seconds: s.durationSeconds,
+      notes: s.notes || null,
+      completed_task_id: s.completedTaskId || null,
+    })),
+    sessions.map((s) => s.id),
+  );
+}
+
+export function persistNoteGroups(
+  userId: string,
+  noteGroups: NoteGroup[],
+): Promise<PersistResult> {
+  return replaceCollection(
+    'note_groups',
+    userId,
+    noteGroups.map((g, index) => ({
+      id: g.id,
+      user_id: userId,
+      title: g.title,
+      notes: g.notes,
+      order_index: index,
+    })),
+    noteGroups.map((g) => g.id),
+  );
+}
+
+export function persistTags(userId: string, tags: Tag[]): Promise<PersistResult> {
+  return replaceCollection(
+    'tags',
+    userId,
+    tags.map((t) => ({
+      id: t.id,
+      user_id: userId,
+      label: t.label,
+      color: t.color,
+    })),
+    tags.map((t) => t.id),
+  );
+}
+
+export async function persistSettings(
+  userId: string,
+  settings: AppSettings,
+): Promise<PersistResult> {
   try {
-    await supabase.from('user_settings').upsert(
+    const { error } = await supabase.from('user_settings').upsert(
       {
         user_id: userId,
         daily_target_minutes: settings.dailyTargetMinutes,
         working_days: settings.workingDays,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'user_id' }
+      { onConflict: 'user_id' },
     );
+    return { error: error ? error.message : null };
   } catch (err) {
-    console.error('Failed to sync settings to Supabase:', err);
+    return { error: toMessage(err) };
   }
 }
 
-/**
- * Upsert active timer state
- */
-export async function syncActiveStateToSupabase(
+export async function persistActiveState(
   userId: string,
-  runningTaskId: string | null,
-  lastActiveTimestamp: number | null,
-  activeSessionStart: number | null
-): Promise<void> {
+  state: ActiveState,
+): Promise<PersistResult> {
   try {
-    await supabase.from('user_active_state').upsert(
+    const { error } = await supabase.from('user_active_state').upsert(
       {
         user_id: userId,
-        running_task_id: runningTaskId,
-        last_active_timestamp: lastActiveTimestamp,
-        active_session_start: activeSessionStart,
+        running_task_id: state.runningTaskId,
+        last_active_timestamp: state.lastActiveTimestamp,
+        active_session_start: state.activeSessionStart,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'user_id' }
+      { onConflict: 'user_id' },
     );
+    return { error: error ? error.message : null };
   } catch (err) {
-    console.error('Failed to sync active state to Supabase:', err);
+    return { error: toMessage(err) };
   }
 }

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronRight, Plus, FolderOpen, Trash2 } from 'lucide-react';
+import { ChevronRight, Plus, FolderOpen, Trash2, Pin } from 'lucide-react';
 import { useApp } from '@/hooks/useApp';
 import { TaskItem } from './TaskItem';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,9 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { MAX_PINNED_GROUPS } from '@/types';
+import { TagFilterBar } from './TagFilterBar';
+import { onFocusSearch, onNewTask } from '@/lib/uiEvents';
 
 export function GroupList() {
   const {
@@ -27,9 +30,86 @@ export function GroupList() {
     removeGroup,
     reorderGroups,
     toggleGroupExpanded,
+    toggleGroupPinned,
+    pinnedGroupCount,
     addTask,
     reorderTasks,
   } = useApp();
+  const [query, setQuery] = useState('');
+  const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const visibleGroupsRef = useRef<typeof groups>([]);
+
+  useEffect(() => onFocusSearch(() => searchRef.current?.focus()), []);
+
+  // The "N" shortcut focuses the first visible group's add-task field,
+  // expanding that group first when it is collapsed.
+  useEffect(
+    () =>
+      onNewTask(() => {
+        const first = visibleGroupsRef.current[0];
+        if (!first) return;
+        const needsExpand = first.expanded === false;
+        if (needsExpand) toggleGroupExpanded(first.id);
+        window.setTimeout(
+          () => document.getElementById(`new-task-${first.id}`)?.focus(),
+          needsExpand ? 450 : 0,
+        );
+      }),
+    [toggleGroupExpanded],
+  );
+
+  const totalCount = useMemo(
+    () => groups.reduce((n, g) => n + g.tasks.length, 0),
+    [groups],
+  );
+
+  // Filter tasks, then drop groups left with nothing to show.
+  const visibleGroups = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle && activeTagIds.length === 0) return groups;
+
+    return groups
+      .map((g) => ({
+        ...g,
+        tasks: g.tasks.filter((t) => {
+          const matchesText =
+            !needle ||
+            t.name.toLowerCase().includes(needle) ||
+            (t.description ?? '').toLowerCase().includes(needle) ||
+            g.name.toLowerCase().includes(needle);
+
+          const matchesTags =
+            activeTagIds.length === 0 ||
+            activeTagIds.every((id) => (t.tagIds ?? []).includes(id));
+
+          return matchesText && matchesTags;
+        }),
+      }))
+      .filter((g) => g.tasks.length > 0);
+  }, [groups, query, activeTagIds]);
+
+  useEffect(() => {
+    visibleGroupsRef.current = visibleGroups;
+  }, [visibleGroups]);
+
+  const matchCount = useMemo(
+    () => visibleGroups.reduce((n, g) => n + g.tasks.length, 0),
+    [visibleGroups],
+  );
+
+  const isFiltering = query.trim().length > 0 || activeTagIds.length > 0;
+
+  const toggleTagFilter = (tagId: string) =>
+    setActiveTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId],
+    );
+
+  const clearFilters = () => {
+    setQuery('');
+    setActiveTagIds([]);
+  };
+
   const [newGroupName, setNewGroupName] = useState('');
   const [newTaskNames, setNewTaskNames] = useState<Record<string, string>>({});
 
@@ -100,9 +180,37 @@ export function GroupList() {
         </Button>
       </form>
 
+      <TagFilterBar
+        query={query}
+        onQueryChange={setQuery}
+        activeTagIds={activeTagIds}
+        onToggleTag={toggleTagFilter}
+        onClear={clearFilters}
+        searchRef={searchRef}
+        matchCount={matchCount}
+        totalCount={totalCount}
+      />
+
+      {isFiltering && visibleGroups.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-white/10 bg-muted/10 p-8 text-center">
+          <p className="text-sm font-medium text-foreground/80">No matching tasks</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Try a different search or clear the tag filters.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={clearFilters}
+            className="mt-4 rounded-lg border-white/10"
+          >
+            Clear filters
+          </Button>
+        </div>
+      )}
+
       <div className="grid gap-4">
         <AnimatePresence mode="popLayout">
-          {groups.map((group, groupIndex) => {
+          {visibleGroups.map((group, groupIndex) => {
             const isRunningInGroup = group.tasks.some(
               (t) => t.id === runningTaskId,
             );
@@ -118,7 +226,7 @@ export function GroupList() {
                 transition={{ duration: 0.2 }}
               >
                 <div
-                  draggable
+                  draggable={!isFiltering}
                   onDragStart={(e: React.DragEvent) => {
                     e.dataTransfer.setData('text/plain', `group:${groupIndex}`);
                     e.dataTransfer.effectAllowed = 'move';
@@ -150,6 +258,7 @@ export function GroupList() {
                     className={cn(
                       'overflow-hidden border-border/40 shadow-sm hover:shadow-lg gap-0 py-0',
                       isExpanded ? 'bg-card shadow-lg' : 'bg-card/40',
+                      group.pinned && 'border-amber-500/25',
                       !isExpanded &&
                         isRunningInGroup &&
                         'running-group-highlight',
@@ -205,7 +314,44 @@ export function GroupList() {
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 font-black text-primary/80 uppercase tracking-tighter shadow-inner">
                           {group.tasks.length}
                         </span>
+                        {group.pinned && (
+                          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 font-black text-amber-300/90 uppercase tracking-tighter shrink-0">
+                            <Pin className="w-2.5 h-2.5 fill-current" />
+                            Pinned
+                          </span>
+                        )}
                       </div>
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleGroupPinned(group.id);
+                        }}
+                        disabled={
+                          !group.pinned && pinnedGroupCount >= MAX_PINNED_GROUPS
+                        }
+                        title={
+                          group.pinned
+                            ? 'Unpin group'
+                            : pinnedGroupCount >= MAX_PINNED_GROUPS
+                              ? `Only ${MAX_PINNED_GROUPS} groups can be pinned`
+                              : 'Pin group to the top'
+                        }
+                        aria-pressed={Boolean(group.pinned)}
+                        aria-label={group.pinned ? 'Unpin group' : 'Pin group'}
+                        className={cn(
+                          'h-8 w-8 rounded-full transition-all z-20',
+                          group.pinned
+                            ? 'text-amber-300 hover:bg-amber-500/10'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/40',
+                        )}
+                      >
+                        <Pin
+                          className={cn('w-3.5 h-3.5', group.pinned && 'fill-current')}
+                        />
+                      </Button>
 
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
@@ -270,6 +416,7 @@ export function GroupList() {
                               className="flex gap-2 mb-6"
                             >
                               <Input
+                                id={`new-task-${group.id}`}
                                 value={newTaskNames[group.id] ?? ''}
                                 onChange={(e) =>
                                   setNewTaskNames((prev) => ({
@@ -295,7 +442,7 @@ export function GroupList() {
                                 {group.tasks.map((task, taskIndex) => (
                                   <div
                                     key={task.id}
-                                    draggable
+                                    draggable={!isFiltering}
                                     onDragStart={(e: React.DragEvent) => {
                                       e.stopPropagation();
                                       e.dataTransfer.setData(
@@ -347,9 +494,7 @@ export function GroupList() {
                                   >
                                     <TaskItem
                                       groupId={group.id}
-                                      taskId={task.id}
-                                      taskName={task.name}
-                                      elapsedSeconds={task.elapsedSeconds}
+                                      task={task}
                                       isRunning={runningTaskId === task.id}
                                     />
                                   </div>

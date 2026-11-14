@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   extractTicketId,
@@ -11,11 +11,13 @@ import {
   getDailyReportData,
   getWeeklyReportData,
   getMonthlyReportData,
+  calculateStreak,
+  comparePeriods,
   generateDetailedTimeLogCsv,
   generateSummaryCsv,
   escapeCsvField,
-} from '../src/lib/analytics.ts';
-import type { WorkSession, AppSettings } from '../src/types/index.ts';
+} from '../src/lib/analytics';
+import type { WorkSession, AppSettings } from '../src/types';
 
 const mockSettings: AppSettings = {
   dailyTargetMinutes: 420, // 7 hours
@@ -270,15 +272,25 @@ describe('Analytics & Time Calculations', () => {
       const lines = csv.split('\r\n');
       assert.equal(
         lines[0],
-        'Date,Project Name,Ticket ID,Task Name / Description,Start Time,End Time,Duration (Minutes),Duration (Hours),Notes'
+        'Date,Project Name,Task Name / Description,Start Time,End Time,Time Spent,Notes'
       );
 
       // Verify data row
+      assert(lines[1].includes('13 Nov 2026'));
       assert(lines[1].includes('"Platform, Team"'));
-      assert(lines[1].includes('PROJ-50'));
-      assert(lines[1].includes('90.00'));
-      assert(lines[1].includes('1.50'));
+      assert(lines[1].includes('9:30 AM'));
+      assert(lines[1].includes('11:00 AM'));
+      assert(lines[1].includes('1h 30m'));
       assert(lines[1].includes('Refactored auth module'));
+
+      // Ticket ID and the decimal duration columns are gone
+      assert(!lines[0].includes('Ticket ID'));
+      assert(!lines[0].includes('Duration'));
+
+      // Final row totals Time Spent
+      const totalLine = lines[lines.length - 1];
+      assert(totalLine.startsWith('Total,'));
+      assert(totalLine.includes('1h 30m'));
     });
 
     test('generateSummaryCsv outputs required columns and aggregates', () => {
@@ -355,7 +367,7 @@ describe('Analytics & Time Calculations', () => {
       const detailedCsv = generateDetailedTimeLogCsv([]);
       assert.equal(
         detailedCsv,
-        'Date,Project Name,Ticket ID,Task Name / Description,Start Time,End Time,Duration (Minutes),Duration (Hours),Notes'
+        'Date,Project Name,Task Name / Description,Start Time,End Time,Time Spent,Notes'
       );
 
       const summaryCsv = generateSummaryCsv('2026-11-13', [], 25200);
@@ -376,5 +388,135 @@ describe('Analytics & Time Calculations', () => {
       // 6 days * 8h = 48 hours = 172800s
       assert.equal(weekly.totalExpectedWorkingSeconds, 172800);
     });
+  });
+
+  describe('Streaks & period comparison', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    // A fixed Wednesday so weekday maths is deterministic.
+    const WED = new Date(2026, 10, 11, 20, 0, 0);
+
+    const sessionOn = (daysAgo: number, seconds: number): WorkSession => {
+      const end = new Date(WED.getTime() - daysAgo * DAY_MS);
+      end.setHours(17, 0, 0, 0);
+      return {
+        id: `s-${daysAgo}`,
+        taskId: 't1',
+        taskName: 'Work',
+        groupName: 'Core',
+        startTime: end.getTime() - seconds * 1000,
+        endTime: end.getTime(),
+        durationSeconds: seconds,
+      };
+    };
+
+    const SEVEN_HOURS = 25200;
+
+    test('counts consecutive working days that met the target', () => {
+      // Wed (today), Tue, Mon all hit 7h
+      const sessions = [sessionOn(0, SEVEN_HOURS), sessionOn(1, SEVEN_HOURS), sessionOn(2, SEVEN_HOURS)];
+      const streak = calculateStreak(sessions, mockSettings, 30, WED);
+      assert.equal(streak.current, 3);
+      assert.equal(streak.includesToday, true);
+    });
+
+    test('an in-progress today does not break the streak', () => {
+      // Tue and Mon hit target; today has only 1h so far
+      const sessions = [sessionOn(0, 3600), sessionOn(1, SEVEN_HOURS), sessionOn(2, SEVEN_HOURS)];
+      const streak = calculateStreak(sessions, mockSettings, 30, WED);
+      assert.equal(streak.current, 2);
+      assert.equal(streak.includesToday, false);
+    });
+
+    test('a missed working day breaks the streak', () => {
+      // Wed hit, Tue missed, Mon hit
+      const sessions = [sessionOn(0, SEVEN_HOURS), sessionOn(2, SEVEN_HOURS)];
+      const streak = calculateStreak(sessions, mockSettings, 30, WED);
+      assert.equal(streak.current, 1);
+      assert.equal(streak.longest, 1);
+    });
+
+    test('weekends are skipped rather than breaking the streak', () => {
+      // Mon(2d ago), Fri(5d ago) and Thu(6d ago) hit target; Sat/Sun have nothing
+      const sessions = [
+        sessionOn(0, SEVEN_HOURS), // Wed
+        sessionOn(1, SEVEN_HOURS), // Tue
+        sessionOn(2, SEVEN_HOURS), // Mon
+        sessionOn(5, SEVEN_HOURS), // Fri
+        sessionOn(6, SEVEN_HOURS), // Thu
+      ];
+      const streak = calculateStreak(sessions, mockSettings, 30, WED);
+      assert.equal(streak.current, 5);
+    });
+
+    test('zero target yields no streak', () => {
+      const sessions = [sessionOn(0, SEVEN_HOURS)];
+      const streak = calculateStreak(sessions, { ...mockSettings, dailyTargetMinutes: 0 }, 30, WED);
+      assert.equal(streak.current, 0);
+    });
+
+    test('comparePeriods reports delta and percent change', () => {
+      const sessions = [sessionOn(0, 7200), sessionOn(7, 3600)];
+      const cmp = comparePeriods(
+        sessions,
+        new Date(WED.getTime() - 6 * DAY_MS), WED,
+        new Date(WED.getTime() - 13 * DAY_MS), new Date(WED.getTime() - 7 * DAY_MS),
+      );
+      assert.equal(cmp.currentSeconds, 7200);
+      assert.equal(cmp.previousSeconds, 3600);
+      assert.equal(cmp.deltaSeconds, 3600);
+      assert.equal(cmp.percentChange, 100);
+    });
+
+    test('percentChange is null when the previous period was empty', () => {
+      const sessions = [sessionOn(0, 7200)];
+      const cmp = comparePeriods(
+        sessions,
+        new Date(WED.getTime() - 6 * DAY_MS), WED,
+        new Date(WED.getTime() - 13 * DAY_MS), new Date(WED.getTime() - 7 * DAY_MS),
+      );
+      assert.equal(cmp.percentChange, null);
+    });
+  });
+});
+
+describe('Detailed CSV ordering', () => {
+  test('rows come out oldest-first even when input is unordered', () => {
+    // Mirrors deriveAllSessions output: recorded sessions (newest first),
+    // then synthesised slices appended regardless of their timestamps.
+    const mk = (id: string, d: number, h: number): WorkSession => {
+      const start = new Date(2026, 10, d, h, 0, 0).getTime();
+      return {
+        id, taskId: id, taskName: `Task ${id}`, groupName: 'Core',
+        startTime: start, endTime: start + 3600_000, durationSeconds: 3600,
+      };
+    };
+
+    const slices = [
+      ...sliceSessionByDay(mk('newest', 13, 9)),
+      ...sliceSessionByDay(mk('older', 11, 9)),
+      ...sliceSessionByDay(mk('oldest', 2, 9)),
+      // appended out of order, as the synthesised slices are
+      ...sliceSessionByDay(mk('synthetic', 13, 23)),
+    ];
+
+    const lines = generateDetailedTimeLogCsv(slices).split('\r\n');
+    const dates = lines.slice(1, -1).map((l) => l.split(',')[0]);
+
+    assert.deepEqual(dates, ['2 Nov 2026', '11 Nov 2026', '13 Nov 2026', '13 Nov 2026']);
+    assert.ok(lines[lines.length - 1].startsWith('Total,'));
+  });
+
+  test('the total still covers every row after sorting', () => {
+    const mk = (id: string, d: number): WorkSession => {
+      const start = new Date(2026, 10, d, 9, 0, 0).getTime();
+      return {
+        id, taskId: id, taskName: id, groupName: 'Core',
+        startTime: start, endTime: start + 1800_000, durationSeconds: 1800,
+      };
+    };
+    const slices = [...sliceSessionByDay(mk('b', 13)), ...sliceSessionByDay(mk('a', 2))];
+    const lines = generateDetailedTimeLogCsv(slices).split('\r\n');
+    assert.ok(lines[lines.length - 1].includes('1h'), 'two 30m rows total 1h');
   });
 });

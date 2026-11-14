@@ -7,6 +7,7 @@ import {
   startOfMonth,
   endOfMonth,
   addDays,
+  subDays,
   getDay,
 } from 'date-fns';
 import type {
@@ -763,6 +764,119 @@ export function getMonthlyReportData(
 /**
  * Proper CSV field escaping for commas, quotes, and newlines.
  */
+/**
+ * Comparison between a period and the one immediately before it.
+ */
+export interface PeriodComparison {
+  currentSeconds: number;
+  previousSeconds: number;
+  deltaSeconds: number;
+  /** Null when the previous period had no tracked time (no sane ratio). */
+  percentChange: number | null;
+}
+
+export function comparePeriods(
+  sessions: WorkSession[],
+  currentStart: Date,
+  currentEnd: Date,
+  previousStart: Date,
+  previousEnd: Date,
+): PeriodComparison {
+  const sum = (from: Date, to: Date) =>
+    getAllSlicesInRange(sessions, from, to).reduce(
+      (total, slice) => total + slice.durationSeconds,
+      0,
+    );
+
+  const currentSeconds = sum(currentStart, currentEnd);
+  const previousSeconds = sum(previousStart, previousEnd);
+
+  return {
+    currentSeconds,
+    previousSeconds,
+    deltaSeconds: currentSeconds - previousSeconds,
+    percentChange:
+      previousSeconds > 0
+        ? Math.round(((currentSeconds - previousSeconds) / previousSeconds) * 100)
+        : null,
+  };
+}
+
+export interface StreakInfo {
+  /** Consecutive working days up to today (or yesterday) that hit the target. */
+  current: number;
+  longest: number;
+  /** True when today itself is already counted. */
+  includesToday: boolean;
+}
+
+/**
+ * Counts consecutive *working* days meeting the daily target.
+ *
+ * Non-working days are skipped rather than breaking the streak — taking the
+ * weekend off shouldn't punish you. Today only breaks a streak once it is
+ * over, so a streak stays intact while the current day is still in progress.
+ */
+export function calculateStreak(
+  sessions: WorkSession[],
+  settings: AppSettings,
+  lookbackDays = 180,
+  now: Date = new Date(),
+): StreakInfo {
+  const targetSeconds = Math.max(0, settings.dailyTargetMinutes * 60);
+  if (targetSeconds === 0) return { current: 0, longest: 0, includesToday: false };
+
+  const workingDays = new Set(settings.workingDays);
+
+  // Total per day key, over the whole lookback window in one pass.
+  const totals = new Map<string, number>();
+  for (const slice of getAllSlicesInRange(
+    sessions,
+    subDays(startOfDay(now), lookbackDays),
+    endOfDay(now),
+  )) {
+    totals.set(
+      slice.dateKey,
+      (totals.get(slice.dateKey) ?? 0) + slice.durationSeconds,
+    );
+  }
+
+  const met = (day: Date) =>
+    (totals.get(format(day, 'yyyy-MM-dd')) ?? 0) >= targetSeconds;
+
+  const todayKey = format(now, 'yyyy-MM-dd');
+  let current = 0;
+  let longest = 0;
+  let running = 0;
+  let includesToday = false;
+  let broken = false;
+
+  for (let i = 0; i <= lookbackDays; i++) {
+    const day = subDays(startOfDay(now), i);
+    if (!workingDays.has(getDay(day))) continue;
+
+    const key = format(day, 'yyyy-MM-dd');
+    const hit = met(day);
+
+    if (hit) {
+      running += 1;
+      longest = Math.max(longest, running);
+      if (!broken) {
+        current = running;
+        if (key === todayKey) includesToday = true;
+      }
+    } else if (key === todayKey) {
+      // Today is still in progress — it neither counts nor breaks the streak.
+      continue;
+    } else {
+      running = 0;
+      broken = true;
+    }
+  }
+
+  return { current, longest, includesToday };
+}
+
 export function escapeCsvField(val: unknown): string {
   if (val === null || val === undefined) return '';
   const str = String(val);
@@ -774,44 +888,54 @@ export function escapeCsvField(val: unknown): string {
 
 /**
  * Generate Detailed Time Log CSV
- * Columns: Date, Project Name, Ticket ID, Task Name / Description, Start Time, End Time, Duration (Minutes), Duration (Hours), Notes
+ * Columns: Date, Project Name, Task Name / Description, Start Time, End Time, Time Spent, Notes
+ * Dates read as "13 Nov 2026" and times as "3:05 PM"; the final row totals Time Spent.
  */
 export function generateDetailedTimeLogCsv(slices: SessionDaySlice[]): string {
   const headers = [
     'Date',
     'Project Name',
-    'Ticket ID',
     'Task Name / Description',
     'Start Time',
     'End Time',
-    'Duration (Minutes)',
-    'Duration (Hours)',
+    'Time Spent',
     'Notes',
   ];
 
-  const rows = slices.map((s) => {
-    const tid = s.session.ticketId || extractTicketId(s.session.taskName) || '-';
+  // Chronological order, oldest first. deriveAllSessions returns recorded
+  // sessions followed by synthesised ones, so without this the tail jumps back
+  // in time (e.g. 13 Nov ... 2 Nov, 13 Nov) and the log reads as broken.
+  const ordered = [...slices].sort((a, b) => a.startTime - b.startTime);
+
+  const rows = ordered.map((s) => {
     const cleanName = cleanTaskTitle(s.session.taskName) || s.session.taskName;
-    const startTimeStr = format(new Date(s.startTime), 'HH:mm:ss');
-    const endTimeStr = format(new Date(s.endTime), 'HH:mm:ss');
-    const durationMins = (s.durationSeconds / 60).toFixed(2);
-    const durationHours = (s.durationSeconds / 3600).toFixed(2);
-    const notesStr = s.session.notes || '';
 
     return [
-      escapeCsvField(s.dateKey),
+      escapeCsvField(format(s.date, 'd MMM yyyy')),
       escapeCsvField(s.session.groupName),
-      escapeCsvField(tid),
       escapeCsvField(cleanName),
-      escapeCsvField(startTimeStr),
-      escapeCsvField(endTimeStr),
-      escapeCsvField(durationMins),
-      escapeCsvField(durationHours),
-      escapeCsvField(notesStr),
+      escapeCsvField(format(new Date(s.startTime), 'h:mm a')),
+      escapeCsvField(format(new Date(s.endTime), 'h:mm a')),
+      escapeCsvField(formatDurationHuman(s.durationSeconds)),
+      escapeCsvField(s.session.notes || ''),
     ].join(',');
   });
 
-  return [headers.join(','), ...rows].join('\r\n');
+  // Nothing to total on an empty export.
+  if (rows.length === 0) return headers.join(',');
+
+  const totalSeconds = ordered.reduce((sum, s) => sum + s.durationSeconds, 0);
+  const totalRow = [
+    escapeCsvField('Total'),
+    '',
+    '',
+    '',
+    '',
+    escapeCsvField(formatDurationHuman(totalSeconds)),
+    '',
+  ].join(',');
+
+  return [headers.join(','), ...rows, totalRow].join('\r\n');
 }
 
 /**
