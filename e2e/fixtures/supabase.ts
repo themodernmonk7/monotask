@@ -70,6 +70,8 @@ export function defaultSeed(): SeedData {
       user_id: TEST_USER.id,
       daily_target_minutes: 420,
       working_days: [1, 2, 3, 4, 5],
+      timer_reminder_enabled: false,
+      timer_reminder_minutes: 5,
     },
     user_active_state: {
       user_id: TEST_USER.id,

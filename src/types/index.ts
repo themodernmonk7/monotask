@@ -73,6 +73,10 @@ export interface WorkSession {
 export interface AppSettings {
   dailyTargetMinutes: number; // e.g. 420 for 7 hours
   workingDays: number[]; // 0 = Sun, 1 = Mon, ..., 6 = Sat. Default: [1, 2, 3, 4, 5]
+  /** Plays a short sound on a repeating interval while a timer is running. Off by default. */
+  timerReminderEnabled: boolean;
+  /** Minutes between reminder sounds while a timer runs. */
+  timerReminderMinutes: number;
 }
 
 export type TargetStatus = 'below' | 'completed' | 'overtime';

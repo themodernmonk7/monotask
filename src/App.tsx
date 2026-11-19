@@ -40,6 +40,7 @@ import {
   requestNewTask,
 } from "./lib/uiEvents"
 import { useDocumentTimer } from "./hooks/useDocumentTimer"
+import { useTimerReminderSound } from "./hooks/useTimerReminderSound"
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts"
 import { useTargetNotification } from "./hooks/useTargetNotification"
 import { UndoToast } from "./components/UndoToast"
@@ -222,6 +223,8 @@ function AppContent() {
     pauseTask,
     undo,
     todayProgress,
+    activeSession,
+    settings,
   } = useApp()
 
   const runningTask = runningTaskId
@@ -241,6 +244,15 @@ function AppContent() {
     todayProgress.loggedSeconds,
     todayProgress.targetSeconds,
     !isLoading,
+  )
+
+  // Reminder sound while a timer runs — plays even if this tab isn't in
+  // focus, which is the point: the title/favicon only help while you're
+  // looking at the screen, sound reaches you when you're not.
+  useTimerReminderSound(
+    activeSession?.startTime ?? null,
+    settings.timerReminderEnabled,
+    settings.timerReminderMinutes,
   )
 
   useKeyboardShortcuts({

@@ -12,6 +12,7 @@ export default defineConfig({
     // `// @vitest-environment jsdom` at the top.
     environment: 'node',
     include: ['test/**/*.test.{ts,tsx}'],
+    setupFiles: ['./test/setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/lib/**', 'src/hooks/**'],

@@ -55,8 +55,16 @@ import type { UserDbData } from '../lib/supabaseDb';
 /** How often running-timer progress is checkpointed to the server. */
 const HEARTBEAT_MS = 30_000;
 
-/** A running timer unattended for longer than this asks before counting it. */
-const IDLE_THRESHOLD_SECONDS = 5 * 60;
+/**
+ * A running timer the app finds still going after a gap this long asks before
+ * counting it — checked ONLY on load (computer slept, browser was closed or
+ * crashed, tab was discarded). Switching tabs or apps while a timer runs is
+ * the normal way to use a time tracker and must never trigger this; it used
+ * to, at a 5-minute threshold, which meant it fired on almost every tab
+ * switch. If a timer is ever left on by mistake, trim it afterwards from the
+ * session list in Reports.
+ */
+const IDLE_THRESHOLD_SECONDS = 30 * 60;
 
 /** How long the undo affordance stays on screen. */
 const UNDO_WINDOW_MS = 8_000;
@@ -172,9 +180,12 @@ export interface IdlePrompt {
   idleSeconds: number;
   since: number;
   /**
-   * True when the idle time is already inside the task's elapsedSeconds (the
-   * tab was open and the tick resumed), false when it was never credited (a
-   * gap restored from the server). Decides which way resolveIdle adjusts.
+   * True when the idle time is already inside the task's elapsedSeconds,
+   * false when it was never credited (a gap restored from the server, which
+   * is the only trigger left — see IDLE_THRESHOLD_SECONDS). Decides which
+   * way resolveIdle adjusts; kept as a field rather than assumed, so the
+   * arithmetic in idleResolution.ts stays correct if another trigger is ever
+   * added back.
    */
   alreadyCounted: boolean;
 }
@@ -207,6 +218,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // reconnecting and this handler running, after which a refetch would
   // overwrite the very edit that was just sent.
   const dirtySinceLoadRef = useRef(false);
+  // Set just before a reconnect-triggered refresh bumps reloadNonce, so
+  // that one pass of the load effect knows not to show the splash screen —
+  // a routine background sync must never look like a page reload.
+  const silentReloadRef = useRef(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
   useEffect(() => {
@@ -306,7 +321,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const idlePromptRef = useRef<IdlePrompt | null>(null);
-  const hiddenAtRef = useRef<number | null>(null);
   const undoRestoreRef = useRef<(() => void) | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const pendingLegacyMigration = useRef(false);
@@ -321,8 +335,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
 
     let alive = true;
+    const silent = silentReloadRef.current;
+    silentReloadRef.current = false;
+
     gateRef.current = { userId: user.id, ready: false };
-    setIsLoading(true);
+    if (!silent) setIsLoading(true);
     setLoadError(null);
 
     const hydrate = (data: UserDbData, fromCache: boolean) => {
@@ -404,7 +421,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     fetchUserData(user.id).then(({ data, error, tablesMissing: missing }) => {
       if (!alive) return;
 
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
       setTablesMissing(missing);
 
       if (data && !missing && !error) {
@@ -440,9 +457,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       alive = false;
       gateRef.current = { userId: user.id, ready: false };
     };
-    // Slice helpers are stable; re-running on them would refetch needlessly.
+    // Depend on the id, not the `user` object: Supabase hands out a NEW
+    // session/user object on every token refresh (notably triggered by the
+    // tab regaining focus, if the access token happens to be near expiry —
+    // see auth-js's _onVisibilityChanged -> _recoverAndRefresh), even though
+    // it's the same account. Depending on the object itself reran this whole
+    // effect — and the splash it shows — on a plain tab switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, reloadNonce]);
+  }, [user?.id, reloadNonce]);
 
   // ---------------------------------------------------------------------------
   // Offline snapshot + reconnection
@@ -492,7 +514,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Nothing local to push, so pull whatever changed elsewhere.
+      // Nothing local to push, so pull whatever changed elsewhere — quietly,
+      // without the UI flashing back to a full loading state.
+      silentReloadRef.current = true;
       setReloadNonce((n) => n + 1);
     };
 
@@ -570,38 +594,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupsState.flush();
       activeState.flush();
     };
+    // Checkpoint only — no idle prompt here. Being in another tab or app
+    // while a timer runs is the normal, intended way to use the tracker.
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        checkpoint();
-        hiddenAtRef.current = activeState.ref.current.runningTaskId
-          ? Date.now()
-          : null;
-        return;
-      }
-
-      // Back on screen: a timer that ran through a long absence gets confirmed.
-      const hiddenAt = hiddenAtRef.current;
-      hiddenAtRef.current = null;
-      if (!hiddenAt) return;
-
-      const runningId = activeState.ref.current.runningTaskId;
-      if (!runningId) return;
-
-      const awaySeconds = Math.floor((Date.now() - hiddenAt) / 1000);
-      if (awaySeconds <= IDLE_THRESHOLD_SECONDS) return;
-      if (idlePromptRef.current) return;
-
-      const runningTask = groupsState.ref.current
-        .flatMap((g) => g.tasks)
-        .find((t) => t.id === runningId);
-
-      setIdlePrompt({
-        taskId: runningId,
-        taskName: runningTask?.name ?? 'your task',
-        idleSeconds: awaySeconds,
-        since: hiddenAt,
-        alreadyCounted: true,
-      });
+      if (document.visibilityState === 'hidden') checkpoint();
     };
     window.addEventListener('pagehide', checkpoint);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -733,6 +729,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? newSettings.dailyTargetMinutes
             : prev.dailyTargetMinutes,
         workingDays: newSettings.workingDays ?? prev.workingDays,
+        timerReminderEnabled:
+          newSettings.timerReminderEnabled ?? prev.timerReminderEnabled,
+        timerReminderMinutes:
+          newSettings.timerReminderMinutes !== undefined &&
+          newSettings.timerReminderMinutes > 0
+            ? newSettings.timerReminderMinutes
+            : prev.timerReminderMinutes,
       }));
     },
     [settingsState],

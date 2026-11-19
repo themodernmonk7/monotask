@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   daily_target_minutes INTEGER NOT NULL DEFAULT 420,
   working_days JSONB NOT NULL DEFAULT '[1,2,3,4,5]'::jsonb,
+  timer_reminder_enabled BOOLEAN NOT NULL DEFAULT false,
+  timer_reminder_minutes INTEGER NOT NULL DEFAULT 5,
   created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
@@ -140,4 +142,6 @@ CREATE POLICY "Users can manage own tags" ON public.tags
 -- Migrations for databases created before a column existed. Safe to re-run.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_minutes INTEGER NOT NULL DEFAULT 5;
 -- END MONOTASK MIGRATIONS

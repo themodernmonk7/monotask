@@ -13,6 +13,8 @@ import { TAG_COLORS } from '@/types';
 export const DEFAULT_SETTINGS: AppSettings = {
   dailyTargetMinutes: 420, // 7 hours
   workingDays: [1, 2, 3, 4, 5], // Monday - Friday
+  timerReminderEnabled: false,
+  timerReminderMinutes: 5,
 };
 
 /** Every write returns its failure instead of swallowing it, so callers can roll back. */
@@ -71,6 +73,8 @@ function toMessage(err: unknown): string {
 export function normalizeSettings(raw: {
   daily_target_minutes?: unknown;
   working_days?: unknown;
+  timer_reminder_enabled?: unknown;
+  timer_reminder_minutes?: unknown;
 }): AppSettings {
   return {
     dailyTargetMinutes:
@@ -80,6 +84,17 @@ export function normalizeSettings(raw: {
     workingDays: Array.isArray(raw.working_days)
       ? (raw.working_days as number[])
       : DEFAULT_SETTINGS.workingDays,
+    // Both columns are new; an account created before this migration has
+    // neither, so a row that's missing them (not just `false`/`0`) must still
+    // land on the real defaults rather than `undefined`.
+    timerReminderEnabled:
+      typeof raw.timer_reminder_enabled === 'boolean'
+        ? raw.timer_reminder_enabled
+        : DEFAULT_SETTINGS.timerReminderEnabled,
+    timerReminderMinutes:
+      typeof raw.timer_reminder_minutes === 'number' && raw.timer_reminder_minutes > 0
+        ? raw.timer_reminder_minutes
+        : DEFAULT_SETTINGS.timerReminderMinutes,
   };
 }
 
@@ -368,6 +383,8 @@ export async function persistSettings(
         user_id: userId,
         daily_target_minutes: settings.dailyTargetMinutes,
         working_days: settings.workingDays,
+        timer_reminder_enabled: settings.timerReminderEnabled,
+        timer_reminder_minutes: settings.timerReminderMinutes,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' },
