@@ -29,6 +29,8 @@ import {
   CloudUpload,
   Plus,
   WifiOff,
+  Sun,
+  Moon,
 } from "lucide-react"
 import { cn } from "./lib/utils"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -40,6 +42,7 @@ import {
   requestNewTask,
 } from "./lib/uiEvents"
 import { useDocumentTimer } from "./hooks/useDocumentTimer"
+import { useTimerReminderSound } from "./hooks/useTimerReminderSound"
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts"
 import { useTargetNotification } from "./hooks/useTargetNotification"
 import { UndoToast } from "./components/UndoToast"
@@ -70,7 +73,7 @@ function Splash({ label }: { label: string }) {
     <div className="min-h-screen bg-background text-foreground font-sans flex flex-col items-center justify-center gap-4">
       <Backdrop />
       <div className="relative z-10 flex flex-col items-center gap-4">
-        <h1 className="text-3xl font-black tracking-tighter bg-gradient-to-br from-white via-white to-white/40 bg-clip-text text-transparent">
+        <h1 className="text-3xl font-black tracking-tighter bg-gradient-to-br from-foreground via-foreground to-foreground/40 bg-clip-text text-transparent">
           Monotask
         </h1>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -222,6 +225,9 @@ function AppContent() {
     pauseTask,
     undo,
     todayProgress,
+    activeSession,
+    settings,
+    updateSettings,
   } = useApp()
 
   const runningTask = runningTaskId
@@ -241,6 +247,15 @@ function AppContent() {
     todayProgress.loggedSeconds,
     todayProgress.targetSeconds,
     !isLoading,
+  )
+
+  // Reminder sound while a timer runs — plays even if this tab isn't in
+  // focus, which is the point: the title/favicon only help while you're
+  // looking at the screen, sound reaches you when you're not.
+  useTimerReminderSound(
+    activeSession?.startTime ?? null,
+    settings.timerReminderEnabled,
+    settings.timerReminderMinutes,
   )
 
   useKeyboardShortcuts({
@@ -293,16 +308,33 @@ function AppContent() {
     [groups, toggleGroupExpanded],
   )
 
+  useEffect(() => {
+    if (isLoading) return
+    document.documentElement.classList.toggle("dark", settings.theme !== "light")
+    // index.html reads this synchronously, before React mounts, so the next
+    // load (or the public share page, which never sees `settings` at all)
+    // paints the right theme immediately instead of flashing dark first.
+    try {
+      localStorage.setItem("monotask-theme", settings.theme)
+    } catch {
+      // Private mode or storage disabled — the pre-paint script just falls
+      // back to its own default, nothing else depends on this succeeding.
+    }
+    return () => {
+      document.documentElement.classList.add("dark")
+    }
+  }, [isLoading, settings.theme])
+
   if (isLoading) return <Splash label="Loading your workspace…" />
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-500 font-sans">
       <Backdrop />
 
-      <header className="relative z-20 border-b border-white/5 bg-background/60 backdrop-blur-xl sticky top-0">
+      <header className="relative z-20 border-b border-foreground/5 bg-background/60 backdrop-blur-xl sticky top-0">
         <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tighter bg-gradient-to-br from-white via-white to-white/40 bg-clip-text text-transparent">
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tighter bg-gradient-to-br from-foreground via-foreground to-foreground/40 bg-clip-text text-transparent">
               Monotask
             </h1>
             <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-[0.2em] mt-0.5 ml-0.5">
@@ -311,7 +343,7 @@ function AppContent() {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-muted/40 border border-white/5 rounded-full pl-2.5 pr-1 py-1 text-xs">
+            <div className="flex items-center gap-1.5 bg-muted/40 border border-foreground/5 rounded-full pl-2.5 pr-1 py-1 text-xs">
               <div className="flex items-center gap-1.5 text-muted-foreground mr-1">
                 {isOffline ? (
                   <WifiOff
@@ -364,6 +396,22 @@ function AppContent() {
               title="Log time manually"
             >
               <Plus className="w-4 h-4" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() =>
+                updateSettings({ theme: settings.theme === "light" ? "dark" : "light" })
+              }
+              className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              title={settings.theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            >
+              {settings.theme === "light" ? (
+                <Moon className="w-4 h-4" />
+              ) : (
+                <Sun className="w-4 h-4" />
+              )}
             </Button>
 
             <Button

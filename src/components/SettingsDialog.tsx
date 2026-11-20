@@ -10,9 +10,14 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Target, Calendar, Check } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Target, Calendar, Check, Bell, Play, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { playChime } from '@/lib/chime';
+import { downloadBackup } from '@/lib/backup';
 import type { AppSettings } from '@/types';
+
+const REMINDER_PRESETS = [5, 10, 15, 30];
 
 const DAYS_OF_WEEK = [
   { value: 1, label: 'Mon', full: 'Monday' },
@@ -33,10 +38,12 @@ function SettingsForm({
   settings,
   onSave,
   onCancel,
+  onDownloadBackup,
 }: {
   settings: AppSettings;
-  onSave: (targetMinutes: number, workingDays: number[]) => void;
+  onSave: (next: Partial<AppSettings>) => void;
   onCancel: () => void;
+  onDownloadBackup: () => void;
 }) {
   const [hours, setHours] = useState(() =>
     Math.floor(settings.dailyTargetMinutes / 60)
@@ -46,6 +53,12 @@ function SettingsForm({
   );
   const [selectedDays, setSelectedDays] = useState<number[]>(
     () => settings.workingDays
+  );
+  const [reminderEnabled, setReminderEnabled] = useState(
+    () => settings.timerReminderEnabled
+  );
+  const [reminderMinutes, setReminderMinutes] = useState(
+    () => settings.timerReminderMinutes
   );
 
   const toggleDay = (day: number) => {
@@ -66,7 +79,12 @@ function SettingsForm({
 
   const handleSave = () => {
     const totalMinutes = Math.max(1, hours * 60 + minutes);
-    onSave(totalMinutes, selectedDays);
+    onSave({
+      dailyTargetMinutes: totalMinutes,
+      workingDays: selectedDays,
+      timerReminderEnabled: reminderEnabled,
+      timerReminderMinutes: reminderMinutes,
+    });
   };
 
   return (
@@ -102,7 +120,7 @@ function SettingsForm({
                 onChange={(e) =>
                   setHours(Math.max(0, parseInt(e.target.value, 10) || 0))
                 }
-                className="bg-muted/30 border-white/10 font-mono text-base"
+                className="bg-muted/30 border-foreground/10 font-mono text-base"
               />
             </div>
             <div className="space-y-1">
@@ -121,7 +139,7 @@ function SettingsForm({
                     )
                   )
                 }
-                className="bg-muted/30 border-white/10 font-mono text-base"
+                className="bg-muted/30 border-foreground/10 font-mono text-base"
               />
             </div>
           </div>
@@ -140,7 +158,7 @@ function SettingsForm({
                   'text-xs px-2.5 py-1 rounded-md border transition-all cursor-pointer font-medium',
                   hours === h && minutes === 0
                     ? 'bg-primary/20 border-primary/40 text-primary font-bold'
-                    : 'bg-muted/20 border-white/5 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                    : 'bg-muted/20 border-foreground/5 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
                 )}
               >
                 {h} Hours {h === 7 ? '(Default)' : ''}
@@ -149,7 +167,7 @@ function SettingsForm({
           </div>
         </div>
 
-        <div className="h-px bg-white/5" />
+        <div className="h-px bg-foreground/5" />
 
         {/* Working Days Setting */}
         <div className="space-y-3">
@@ -176,7 +194,7 @@ function SettingsForm({
                     'flex flex-col items-center justify-center py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer',
                     isSelected
                       ? 'bg-primary/20 border-primary/40 text-primary shadow-[0_0_10px_oklch(var(--primary)/15%)]'
-                      : 'bg-muted/10 border-white/5 text-muted-foreground/60 hover:text-foreground hover:bg-muted/30'
+                      : 'bg-muted/10 border-foreground/5 text-muted-foreground/60 hover:text-foreground hover:bg-muted/30'
                   )}
                 >
                   <span>{day.label}</span>
@@ -216,6 +234,101 @@ function SettingsForm({
             </button>
           </div>
         </div>
+
+        <div className="h-px bg-foreground/5" />
+
+        {/* Timer Reminder Sound Setting */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <label
+              htmlFor="reminder-toggle"
+              className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2 cursor-pointer"
+            >
+              <Bell className="w-3.5 h-3.5 text-primary" />
+              <span>Timer Reminder</span>
+            </label>
+            <Switch
+              id="reminder-toggle"
+              checked={reminderEnabled}
+              onCheckedChange={setReminderEnabled}
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Play a short sound on a repeat while a timer is running, so it's
+            easy to notice it's still going — even if you've switched to
+            another tab or app.
+          </p>
+
+          {reminderEnabled && (
+            <div className="space-y-2.5 pt-1">
+              <div className="flex items-center gap-1.5">
+                {REMINDER_PRESETS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setReminderMinutes(m)}
+                    className={cn(
+                      'text-xs px-2.5 py-1 rounded-md border transition-all cursor-pointer font-medium',
+                      reminderMinutes === m
+                        ? 'bg-primary/20 border-primary/40 text-primary font-bold'
+                        : 'bg-muted/20 border-foreground/5 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                    )}
+                  >
+                    {m} min
+                  </button>
+                ))}
+                <Input
+                  type="number"
+                  min="1"
+                  max="180"
+                  value={reminderMinutes}
+                  onChange={(e) =>
+                    setReminderMinutes(
+                      Math.min(180, Math.max(1, parseInt(e.target.value, 10) || 1))
+                    )
+                  }
+                  className="bg-muted/30 border-foreground/10 font-mono text-sm h-7 w-16 ml-auto"
+                  aria-label="Custom reminder interval in minutes"
+                />
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => playChime()}
+                className="rounded-lg gap-1.5 text-xs border-foreground/10"
+              >
+                <Play className="w-3 h-3 fill-current" />
+                Preview sound
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="h-px bg-foreground/5" />
+
+        {/* Backup */}
+        <div className="space-y-2">
+          <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <Download className="w-3.5 h-3.5 text-primary" />
+            <span>Your Data</span>
+          </label>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Download everything — tasks, sessions, notes, tags and settings —
+            as one JSON file you keep for yourself.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onDownloadBackup}
+            className="rounded-lg gap-1.5 text-xs border-foreground/10"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download my data
+          </Button>
+        </div>
       </div>
 
       <DialogFooter className="mt-4 gap-2">
@@ -236,14 +349,16 @@ function SettingsForm({
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const { settings, updateSettings } = useApp();
+  const { settings, updateSettings, groups, completedTasks, sessions, noteGroups, tags } =
+    useApp();
 
-  const handleSave = (dailyTargetMinutes: number, workingDays: number[]) => {
-    updateSettings({
-      dailyTargetMinutes,
-      workingDays,
-    });
+  const handleSave = (next: Partial<AppSettings>) => {
+    updateSettings(next);
     onOpenChange(false);
+  };
+
+  const handleDownloadBackup = () => {
+    downloadBackup({ groups, completedTasks, sessions, noteGroups, tags, settings });
   };
 
   return (
@@ -254,6 +369,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             settings={settings}
             onSave={handleSave}
             onCancel={() => onOpenChange(false)}
+            onDownloadBackup={handleDownloadBackup}
           />
         )}
       </DialogContent>

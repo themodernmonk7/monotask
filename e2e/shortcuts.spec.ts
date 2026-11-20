@@ -19,7 +19,7 @@ test.describe('Keyboard shortcuts', () => {
     await page.locator('body').click()
     await page.keyboard.press(' ')
     await expect.poll(() => page.title(), { timeout: 10_000 }).toContain('Monotask')
-    await expect.poll(() => page.title()).toMatch(/^\(\d{2}:/)
+    await expect.poll(() => page.title()).toMatch(/^\d+:\d{2} min /)
 
     await page.keyboard.press('Escape')
     await expect.poll(() => page.title()).toBe('Monotask')

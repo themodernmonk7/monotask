@@ -123,7 +123,7 @@ export function TaskItem({ groupId, task, isRunning }: TaskItemProps) {
         'flex flex-col gap-3 py-3 px-4 rounded-xl border transition-all duration-500 group/task relative overflow-hidden scroll-mt-24',
         isRunning
           ? 'border-primary/50 bg-primary/5 ring-1 ring-primary/20 shadow-[0_0_20px_-5px_oklch(var(--primary)_/_15%)]'
-          : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/10',
+          : 'border-foreground/5 bg-foreground/[0.02] hover:bg-foreground/[0.05] hover:border-foreground/10',
         highlighted && 'ring-2 ring-primary/70 border-primary/60',
       )}
     >
@@ -223,7 +223,7 @@ export function TaskItem({ groupId, task, isRunning }: TaskItemProps) {
                 <Trash2 className="w-3.5 h-3.5" />
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="bg-card border-white/5 backdrop-blur-xl">
+            <AlertDialogContent className="bg-card border-foreground/5 backdrop-blur-xl">
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete Task?</AlertDialogTitle>
                 <AlertDialogDescription className="text-muted-foreground">
@@ -306,7 +306,7 @@ export function TaskItem({ groupId, task, isRunning }: TaskItemProps) {
                   }}
                   placeholder="What does done look like?"
                   rows={3}
-                  className="bg-background/40 border-white/10 text-xs rounded-xl resize-y min-h-[64px]"
+                  className="bg-background/40 border-foreground/10 text-xs rounded-xl resize-y min-h-[64px]"
                 />
               </div>
 
@@ -331,7 +331,7 @@ export function TaskItem({ groupId, task, isRunning }: TaskItemProps) {
                           type="button"
                           onClick={() => toggleTaskTag(groupId, taskId, tag.id)}
                           aria-label={`Remove tag ${tag.label}`}
-                          className="rounded-full p-0.5 hover:bg-white/15 transition-colors cursor-pointer"
+                          className="rounded-full p-0.5 hover:bg-foreground/15 transition-colors cursor-pointer"
                         >
                           <X className="w-2.5 h-2.5" />
                         </button>
@@ -359,7 +359,7 @@ export function TaskItem({ groupId, task, isRunning }: TaskItemProps) {
                     id={`move-${taskId}`}
                     value={groupId}
                     onChange={(e) => moveTask(groupId, e.target.value, taskId)}
-                    className="w-full h-8 rounded-lg bg-background/40 border border-white/10 px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                    className="w-full h-8 rounded-lg bg-background/40 border border-foreground/10 px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                   >
                     {groups.map((g) => (
                       <option key={g.id} value={g.id}>

@@ -50,6 +50,36 @@ test.describe('Offline resilience', () => {
     await expect(page.getByText('Written while offline')).toBeVisible()
   })
 
+  test('a reconnect with no local edits refreshes quietly, without the loading splash', async ({ page }) => {
+    // The regression this guards: a reconnect that had nothing to push used
+    // to re-enter the same code path as a cold load, which flashed the full
+    // "Loading your workspace…" splash for what should be an invisible
+    // background refresh.
+    await signIn(page)
+    await mockSupabase(page)
+
+    await page.goto('/')
+    await expect(page.getByText('Supabase sync refactor')).toBeVisible()
+
+    let groupsRefetched = false
+    page.on('request', (r) => {
+      if (r.method() === 'GET' && r.url().includes('/rest/v1/groups')) groupsRefetched = true
+    })
+
+    // No edits were made, so this must take the silent "pull latest" path.
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+
+    // Checked immediately, before the refetch resolves — this is exactly the
+    // instant the splash used to appear.
+    await expect(page.getByText(/Loading your workspace/)).toBeHidden()
+    await expect(page.getByText('Supabase sync refactor')).toBeVisible()
+
+    await expect.poll(() => groupsRefetched, { timeout: 10_000 }).toBe(true)
+    // Still true after the refresh actually completed.
+    await expect(page.getByText(/Loading your workspace/)).toBeHidden()
+    await expect(page.getByText('Supabase sync refactor')).toBeVisible()
+  })
+
   test('with no cache at all it offers a retry instead of hanging', async ({ page }) => {
     await signIn(page)
     const backend = await mockSupabase(page)

@@ -7,6 +7,7 @@ import {
   moveTaskBetweenGroups,
   pinnedFirst,
   removeTagFromTasks,
+  setGroupColor,
   toggleGroupPinned,
 } from '../src/lib/taskMutations';
 import type { Group, Tag, WorkSession } from '../src/types';
@@ -194,5 +195,29 @@ describe('applySessionPatch', () => {
     const withNotes = { ...base, notes: 'keep me' };
     const out = applySessionPatch(withNotes, { endTime: base.endTime + 1000 });
     assert.equal(out?.session.notes, 'keep me');
+  });
+});
+
+describe('setGroupColor', () => {
+  test('sets a color on a group', () => {
+    const out = setGroupColor([g('a')], 'a', 'violet');
+    assert.equal(out[0].color, 'violet');
+  });
+
+  test('clicking the same color again clears it back to neutral', () => {
+    const colored = setGroupColor([g('a')], 'a', 'violet');
+    const cleared = setGroupColor(colored, 'a', 'violet');
+    assert.equal(cleared[0].color, undefined);
+  });
+
+  test('switching colors replaces, not toggles off', () => {
+    const violet = setGroupColor([g('a')], 'a', 'violet');
+    const sky = setGroupColor(violet, 'a', 'sky');
+    assert.equal(sky[0].color, 'sky');
+  });
+
+  test('no-ops for an unknown group', () => {
+    const input = [g('a')];
+    assert.equal(setGroupColor(input, 'ghost', 'red'), input);
   });
 });

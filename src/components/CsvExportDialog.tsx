@@ -197,7 +197,7 @@ export function CsvExportDialog({
                   'flex flex-col text-left p-3 rounded-xl border transition-all cursor-pointer',
                   exportType === 'detailed'
                     ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/20'
-                    : 'bg-muted/10 border-white/5 hover:bg-muted/20 hover:border-white/10'
+                    : 'bg-muted/10 border-foreground/5 hover:bg-muted/20 hover:border-foreground/10'
                 )}
               >
                 <div className="flex items-center justify-between mb-1">
@@ -221,7 +221,7 @@ export function CsvExportDialog({
                   'flex flex-col text-left p-3 rounded-xl border transition-all cursor-pointer',
                   exportType === 'summary'
                     ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/20'
-                    : 'bg-muted/10 border-white/5 hover:bg-muted/20 hover:border-white/10'
+                    : 'bg-muted/10 border-foreground/5 hover:bg-muted/20 hover:border-foreground/10'
                 )}
               >
                 <div className="flex items-center justify-between mb-1">
@@ -245,7 +245,7 @@ export function CsvExportDialog({
             <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Reporting Period
             </label>
-            <div className="grid grid-cols-4 gap-1.5 p-1 bg-muted/30 rounded-xl border border-white/5">
+            <div className="grid grid-cols-4 gap-1.5 p-1 bg-muted/30 rounded-xl border border-foreground/5">
               {(['day', 'week', 'month', 'custom'] as ExportScope[]).map((s) => (
                 <button
                   key={s}
@@ -265,7 +265,7 @@ export function CsvExportDialog({
           </div>
 
           {/* Date Selector Inputs based on scope */}
-          <div className="space-y-3 bg-muted/10 border border-white/5 rounded-xl p-3">
+          <div className="space-y-3 bg-muted/10 border border-foreground/5 rounded-xl p-3">
             {scope === 'day' && (
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -276,7 +276,7 @@ export function CsvExportDialog({
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-card/50 border-white/10 font-mono text-sm"
+                  className="bg-card/50 border-foreground/10 font-mono text-sm"
                 />
               </div>
             )}
@@ -291,7 +291,7 @@ export function CsvExportDialog({
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-card/50 border-white/10 font-mono text-sm"
+                  className="bg-card/50 border-foreground/10 font-mono text-sm"
                 />
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Selected Week: {periodLabel}
@@ -309,7 +309,7 @@ export function CsvExportDialog({
                   type="month"
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="bg-card/50 border-white/10 font-mono text-sm"
+                  className="bg-card/50 border-foreground/10 font-mono text-sm"
                 />
               </div>
             )}
@@ -322,7 +322,7 @@ export function CsvExportDialog({
                     type="date"
                     value={customStart}
                     onChange={(e) => setCustomStart(e.target.value)}
-                    className="bg-card/50 border-white/10 font-mono text-sm"
+                    className="bg-card/50 border-foreground/10 font-mono text-sm"
                   />
                 </div>
                 <div className="space-y-1">
@@ -331,7 +331,7 @@ export function CsvExportDialog({
                     type="date"
                     value={customEnd}
                     onChange={(e) => setCustomEnd(e.target.value)}
-                    className="bg-card/50 border-white/10 font-mono text-sm"
+                    className="bg-card/50 border-foreground/10 font-mono text-sm"
                   />
                 </div>
               </div>
@@ -339,7 +339,7 @@ export function CsvExportDialog({
           </div>
 
           {/* Export File & Summary Preview */}
-          <div className="bg-muted/30 border border-white/5 rounded-xl p-3 space-y-2 text-xs">
+          <div className="bg-muted/30 border border-foreground/5 rounded-xl p-3 space-y-2 text-xs">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Output File:</span>
               <span className="font-mono font-bold text-foreground truncate max-w-[260px]">

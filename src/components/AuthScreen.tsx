@@ -150,9 +150,9 @@ export function AuthScreen() {
         <div className="absolute bottom-[-25%] right-[-10%] w-[55%] h-[55%] rounded-full bg-emerald-500/5 blur-[160px] animate-pulse [animation-delay:2s]" />
       </div>
 
-      <div className="relative z-10 w-full max-w-4xl grid lg:grid-cols-2 rounded-3xl overflow-hidden border border-white/5 bg-card/40 backdrop-blur-xl shadow-2xl">
+      <div className="relative z-10 w-full max-w-4xl grid lg:grid-cols-2 rounded-3xl overflow-hidden border border-foreground/5 bg-card/40 backdrop-blur-xl shadow-2xl">
         {/* Brand panel */}
-        <div className="hidden lg:flex flex-col justify-between p-10 bg-gradient-to-br from-primary/10 via-transparent to-emerald-500/5 border-r border-white/5">
+        <div className="hidden lg:flex flex-col justify-between p-10 bg-gradient-to-br from-primary/10 via-transparent to-emerald-500/5 border-r border-foreground/5">
           <div>
             <h1 className="text-4xl font-black tracking-tighter bg-gradient-to-br from-white via-white to-white/40 bg-clip-text text-transparent">
               Monotask
@@ -197,7 +197,7 @@ export function AuthScreen() {
           <div
             role="tablist"
             aria-label="Authentication mode"
-            className="grid grid-cols-3 p-1 bg-muted/30 rounded-xl border border-white/5 text-xs font-semibold mb-7"
+            className="grid grid-cols-3 p-1 bg-muted/30 rounded-xl border border-foreground/5 text-xs font-semibold mb-7"
           >
             {MODES.map((m) => (
               <button
@@ -263,7 +263,7 @@ export function AuthScreen() {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Ada Lovelace"
                   maxLength={80}
-                  className="bg-card/50 border-white/10 h-11 rounded-xl"
+                  className="bg-card/50 border-foreground/10 h-11 rounded-xl"
                 />
               </div>
             )}
@@ -283,7 +283,7 @@ export function AuthScreen() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="bg-card/50 border-white/10 h-11 rounded-xl"
+                className="bg-card/50 border-foreground/10 h-11 rounded-xl"
                 autoFocus={mode !== "signup"}
               />
             </div>
@@ -307,7 +307,7 @@ export function AuthScreen() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="bg-card/50 border-white/10 h-11 rounded-xl pr-11"
+                    className="bg-card/50 border-foreground/10 h-11 rounded-xl pr-11"
                   />
                   <button
                     type="button"
@@ -369,7 +369,7 @@ export function AuthScreen() {
                   onChange={(e) => setConfirm(e.target.value)}
                   placeholder="••••••••"
                   aria-invalid={confirm.length > 0 && confirm !== password}
-                  className="bg-card/50 border-white/10 h-11 rounded-xl"
+                  className="bg-card/50 border-foreground/10 h-11 rounded-xl"
                 />
                 {confirm.length > 0 && confirm !== password && (
                   <p className="text-[11px] text-destructive">

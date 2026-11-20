@@ -11,13 +11,13 @@ test.describe('Running timer', () => {
     await page.getByRole('button', { name: /start/i }).first().click()
 
     await expect.poll(() => page.title(), { timeout: 10_000 }).toMatch(
-      /^\(\d{2}:\d{2}:\d{2}\) Supabase sync refactor/,
+      /^\d+:\d{2} min Supabase sync refactor/,
     )
 
     const readSeconds = async () => {
-      const m = (await page.title()).match(/\((\d{2}):(\d{2}):(\d{2})\)/)
+      const m = (await page.title()).match(/^(\d+):(\d{2}) min/)
       if (!m) throw new Error(`title had no timer: ${await page.title()}`)
-      return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+      return Number(m[1]) * 60 + Number(m[2])
     }
 
     const before = await readSeconds()

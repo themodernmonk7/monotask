@@ -1,11 +1,43 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      // Only precache the built app shell (HTML/JS/CSS/icons) — app data
+      // already has its own offline story (src/lib/localCache.ts), so the
+      // service worker's job here is just "the app itself still opens
+      // with no network", not caching API responses.
+      includeAssets: ['favicon.ico'],
+      manifest: {
+        name: 'Monotask',
+        short_name: 'Monotask',
+        description: 'Focus on one task at a time and track where your hours go.',
+        start_url: '/',
+        display: 'standalone',
+        background_color: '#0b0f14',
+        theme_color: '#0b0f14',
+        icons: [
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,wav}'],
+        // The app is a single route rendered client-side; any navigation
+        // (including a deep link opened while offline) should fall back to
+        // the cached shell rather than a browser offline error page.
+        navigateFallback: '/index.html',
+      },
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

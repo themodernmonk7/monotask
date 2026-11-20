@@ -1,4 +1,4 @@
-import type { Group, Tag, Task, WorkSession } from '../types';
+import type { Group, Tag, TagColor, Task, WorkSession } from '../types';
 import { MAX_PINNED_GROUPS } from '../types';
 
 /**
@@ -52,6 +52,19 @@ export function adjustTaskElapsed(
   });
 
   return changed ? next : groups;
+}
+
+/** Clicking the same color again clears it back to neutral (a toggle, not a one-way set). */
+export function setGroupColor(
+  groups: Group[],
+  groupId: string,
+  color: TagColor,
+): Group[] {
+  const target = groups.find((g) => g.id === groupId);
+  if (!target) return groups;
+
+  const next = target.color === color ? undefined : color;
+  return groups.map((g) => (g.id === groupId ? { ...g, color: next } : g));
 }
 
 /** Toggling respects the pin cap; at the cap the groups come back untouched. */

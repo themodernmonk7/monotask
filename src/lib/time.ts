@@ -1,4 +1,17 @@
 /**
+ * Format seconds as "M:SS" (minutes unpadded, seconds zero-padded), growing
+ * the minute count unboundedly rather than rolling into an hour segment —
+ * e.g. 95s -> "1:35", 3600s -> "60:00". For compact spots like the tab title,
+ * where "00:01:55" reads like a wall clock rather than an elapsed duration.
+ */
+export function formatMinSec(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${s.toString().padStart(2, "0")}`
+}
+
+/**
  * Format seconds as HH:MM:SS (e.g. 1h 20m -> 01:20:00)
  */
 export function formatElapsed(seconds: number): string {

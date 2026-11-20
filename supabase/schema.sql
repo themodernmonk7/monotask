@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   daily_target_minutes INTEGER NOT NULL DEFAULT 420,
   working_days JSONB NOT NULL DEFAULT '[1,2,3,4,5]'::jsonb,
+  timer_reminder_enabled BOOLEAN NOT NULL DEFAULT false,
+  timer_reminder_minutes INTEGER NOT NULL DEFAULT 5,
+  theme TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('light', 'dark')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
@@ -31,6 +34,7 @@ CREATE TABLE IF NOT EXISTS public.groups (
   tasks JSONB NOT NULL DEFAULT '[]'::jsonb,
   expanded BOOLEAN NOT NULL DEFAULT true,
   pinned BOOLEAN NOT NULL DEFAULT false,
+  color TEXT,
   order_index INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -136,8 +140,74 @@ DROP POLICY IF EXISTS "Users can manage own tags" ON public.tags;
 CREATE POLICY "Users can manage own tags" ON public.tags
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
+-- 8. Shared Reports (public read-only links to a frozen report snapshot)
+--
+-- The snapshot is computed and frozen client-side at share time — this table
+-- never gives a visitor live query access to your sessions or tasks, only a
+-- fixed JSON summary you explicitly chose to share. Revoking sets `revoked`
+-- rather than deleting, so a dead link fails closed instantly without a
+-- round trip to find and remove the row first.
+CREATE TABLE IF NOT EXISTS public.shared_reports (
+  -- Generated server-side (pgcrypto, standard on Supabase) rather than
+  -- client-side: this id doubles as the link's only access control, so it
+  -- must come from a real CSPRNG, not the app's usual short client-generated
+  -- ids used elsewhere for tasks/groups.
+  id UUID NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  period_label TEXT NOT NULL,
+  report_type TEXT NOT NULL CHECK (report_type IN ('daily', 'weekly', 'monthly')),
+  owner_name TEXT,
+  snapshot JSONB NOT NULL,
+  revoked BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.shared_reports ENABLE ROW LEVEL SECURITY;
+
+-- Owner: full control (create, list, revoke) over their own rows.
+DROP POLICY IF EXISTS "Users can manage own shared reports" ON public.shared_reports;
+CREATE POLICY "Users can manage own shared reports" ON public.shared_reports
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Deliberately NO public SELECT policy here. A policy like
+-- `USING (revoked = false)` was tried first and rejected: Postgres RLS
+-- filters rows, it doesn't know or care that the app's client always adds
+-- `.eq('id', ...)` — a policy that permits reading any non-revoked row lets
+-- a direct REST call with no id filter at all list every user's shares. The
+-- public anon key is not a secret (it ships in the browser bundle), so that
+-- would be a real way to enumerate other people's reports.
+--
+-- Instead, a visitor's ONLY path to this table is the function below, which
+-- structurally cannot return more than the one row whose id you already
+-- have — there is no argument that lists or wildcards.
+CREATE OR REPLACE FUNCTION public.get_shared_report(share_id UUID)
+RETURNS TABLE (
+  id UUID,
+  period_label TEXT,
+  report_type TEXT,
+  owner_name TEXT,
+  snapshot JSONB,
+  created_at TIMESTAMPTZ
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT sr.id, sr.period_label, sr.report_type, sr.owner_name, sr.snapshot, sr.created_at
+  FROM public.shared_reports sr
+  WHERE sr.id = share_id AND sr.revoked = false;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_shared_report(UUID) FROM public;
+GRANT EXECUTE ON FUNCTION public.get_shared_report(UUID) TO anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Migrations for databases created before a column existed. Safe to re-run.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_minutes INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS color TEXT;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('light', 'dark'));
 -- END MONOTASK MIGRATIONS

@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Share2,
   FolderOpen,
   Ticket,
   Clock,
@@ -27,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CsvExportDialog } from './CsvExportDialog';
 import { SessionList } from './SessionList';
+import { ShareReportDialog } from './ShareReportDialog';
 import {
   format,
   addDays,
@@ -39,15 +41,22 @@ import {
   endOfWeek,
 } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { TAG_SWATCH_CLASSES } from '@/lib/tagColors';
+import {
+  buildDailySnapshot,
+  buildWeeklySnapshot,
+  buildMonthlySnapshot,
+} from '@/lib/sharedReports';
 
 type ReportTab = 'daily' | 'weekly' | 'monthly';
 
 export function ReportsView() {
-  const { allSessions, settings } = useApp();
+  const { allSessions, settings, groups } = useApp();
 
   const [activeTab, setActiveTab] = useState<ReportTab>('daily');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [exportOpen, setExportOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Navigation handlers
   const handlePrev = () => {
@@ -92,12 +101,33 @@ export function ReportsView() {
     return getMonthlyReportData(allSessions, currentDate, settings);
   }, [allSessions, currentDate, settings]);
 
+  // What a "Share" click would freeze right now, for whichever period is on
+  // screen — built eagerly so the dialog has no computation of its own to do.
+  const { shareLabel, shareSnapshot } = useMemo(() => {
+    if (activeTab === 'daily') {
+      return {
+        shareLabel: format(currentDate, 'EEEE, MMMM d, yyyy'),
+        shareSnapshot: buildDailySnapshot(dailyData),
+      };
+    }
+    if (activeTab === 'weekly') {
+      return {
+        shareLabel: `${format(weeklyData.startDate, 'MMM d')} – ${format(weeklyData.endDate, 'MMM d, yyyy')}`,
+        shareSnapshot: buildWeeklySnapshot(weeklyData),
+      };
+    }
+    return {
+      shareLabel: monthlyData.monthName,
+      shareSnapshot: buildMonthlySnapshot(monthlyData),
+    };
+  }, [activeTab, currentDate, dailyData, weeklyData, monthlyData]);
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top Header: Sub-tabs and Export Button */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         {/* Segmented Control: Daily / Weekly / Monthly */}
-        <div className="grid grid-cols-3 p-1 bg-muted/40 rounded-xl border border-white/5 h-10 w-full sm:w-72">
+        <div className="grid grid-cols-3 p-1 bg-muted/40 rounded-xl border border-foreground/5 h-10 w-full sm:w-72">
           {(['daily', 'weekly', 'monthly'] as ReportTab[]).map((tab) => (
             <button
               key={tab}
@@ -114,20 +144,31 @@ export function ReportsView() {
           ))}
         </div>
 
-        {/* Export CSV Trigger Button */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setExportOpen(true)}
-          className="rounded-xl border-white/10 hover:bg-muted/40 gap-2 shrink-0 font-medium"
-        >
-          <Download className="w-4 h-4 text-primary" />
-          <span>Export CSV</span>
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShareOpen(true)}
+            className="rounded-xl border-foreground/10 hover:bg-muted/40 gap-2 font-medium"
+          >
+            <Share2 className="w-4 h-4 text-primary" />
+            <span>Share</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setExportOpen(true)}
+            className="rounded-xl border-foreground/10 hover:bg-muted/40 gap-2 font-medium"
+          >
+            <Download className="w-4 h-4 text-primary" />
+            <span>Export CSV</span>
+          </Button>
+        </div>
       </div>
 
       {/* Date Navigation Bar */}
-      <div className="flex items-center justify-between bg-card/40 border border-white/5 rounded-2xl p-2.5 shadow-sm">
+      <div className="flex items-center justify-between bg-card/40 border border-foreground/5 rounded-2xl p-2.5 shadow-sm">
         <Button
           variant="ghost"
           size="icon"
@@ -176,13 +217,13 @@ export function ReportsView() {
 
       {/* Streak + week-over-week momentum */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Card className="bg-card/40 border-white/5 p-4 flex items-center gap-3">
+        <Card className="bg-card/40 border-foreground/5 p-4 flex items-center gap-3">
           <span
             className={cn(
               'w-10 h-10 rounded-xl flex items-center justify-center border shrink-0',
               streak.current > 0
                 ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                : 'bg-muted/30 border-white/5 text-muted-foreground',
+                : 'bg-muted/30 border-foreground/5 text-muted-foreground',
             )}
           >
             <Flame
@@ -204,7 +245,7 @@ export function ReportsView() {
           </div>
         </Card>
 
-        <Card className="bg-card/40 border-white/5 p-4 flex items-center gap-3">
+        <Card className="bg-card/40 border-foreground/5 p-4 flex items-center gap-3">
           {(() => {
             const up = weekComparison.deltaSeconds > 0;
             const flat = weekComparison.deltaSeconds === 0;
@@ -215,7 +256,7 @@ export function ReportsView() {
                   className={cn(
                     'w-10 h-10 rounded-xl flex items-center justify-center border shrink-0',
                     flat
-                      ? 'bg-muted/30 border-white/5 text-muted-foreground'
+                      ? 'bg-muted/30 border-foreground/5 text-muted-foreground'
                       : up
                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                         : 'bg-sky-500/10 border-sky-500/30 text-sky-400',
@@ -258,7 +299,7 @@ export function ReportsView() {
           >
             {/* Daily Key Metrics */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Total Logged
                 </span>
@@ -270,7 +311,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Target vs Actual
                 </span>
@@ -286,7 +327,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   {dailyData.status === 'overtime' ? 'Overtime' : 'Remaining'}
                 </span>
@@ -311,7 +352,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Tasks / Tickets
                 </span>
@@ -326,7 +367,7 @@ export function ReportsView() {
 
             {/* Daily Empty State */}
             {dailyData.totalWorkingSeconds === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center space-y-3 bg-card/20 rounded-2xl border border-dashed border-white/10">
+              <div className="flex flex-col items-center justify-center py-16 text-center space-y-3 bg-card/20 rounded-2xl border border-dashed border-foreground/10">
                 <div className="w-12 h-12 rounded-full bg-muted/40 flex items-center justify-center">
                   <Clock className="w-6 h-6 text-muted-foreground/40" />
                 </div>
@@ -340,8 +381,8 @@ export function ReportsView() {
             ) : (
               <>
                 {/* Project-wise Breakdown */}
-                <Card className="bg-card/40 border-white/5 overflow-hidden">
-                  <CardHeader className="p-4 pb-2 border-b border-white/5">
+                <Card className="bg-card/40 border-foreground/5 overflow-hidden">
+                  <CardHeader className="p-4 pb-2 border-b border-foreground/5">
                     <div className="flex items-center gap-2">
                       <FolderOpen className="w-4 h-4 text-primary" />
                       <CardTitle className="text-sm font-bold tracking-tight">
@@ -353,10 +394,23 @@ export function ReportsView() {
                     {dailyData.projects.map((proj) => (
                       <div
                         key={proj.projectName}
-                        className="p-4 space-y-2 hover:bg-white/[0.01] transition-colors"
+                        className="p-4 space-y-2 hover:bg-foreground/[0.01] transition-colors"
                       >
                         <div className="flex items-center justify-between text-sm">
                           <div className="flex items-center gap-2 min-w-0">
+                            {(() => {
+                              const color = groups.find(
+                                (g) => g.name === proj.projectName,
+                              )?.color;
+                              return color ? (
+                                <span
+                                  className={cn(
+                                    'w-2 h-2 rounded-full shrink-0',
+                                    TAG_SWATCH_CLASSES[color],
+                                  )}
+                                />
+                              ) : null;
+                            })()}
                             <span className="font-bold text-foreground truncate">
                               {proj.projectName}
                             </span>
@@ -386,8 +440,8 @@ export function ReportsView() {
                 </Card>
 
                 {/* Ticket-wise Breakdown */}
-                <Card className="bg-card/40 border-white/5 overflow-hidden">
-                  <CardHeader className="p-4 pb-2 border-b border-white/5">
+                <Card className="bg-card/40 border-foreground/5 overflow-hidden">
+                  <CardHeader className="p-4 pb-2 border-b border-foreground/5">
                     <div className="flex items-center gap-2">
                       <Ticket className="w-4 h-4 text-primary" />
                       <CardTitle className="text-sm font-bold tracking-tight">
@@ -399,7 +453,7 @@ export function ReportsView() {
                     {dailyData.tickets.map((t) => (
                       <div
                         key={`${t.projectName}-${t.taskName}`}
-                        className="p-4 flex items-center justify-between gap-4 hover:bg-white/[0.01] transition-colors"
+                        className="p-4 flex items-center justify-between gap-4 hover:bg-foreground/[0.01] transition-colors"
                       >
                         <div className="space-y-1 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -458,7 +512,7 @@ export function ReportsView() {
           >
             {/* Weekly Key Metrics */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Total Working Hours
                 </span>
@@ -470,7 +524,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Expected Working Hours
                 </span>
@@ -482,7 +536,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Average / Day
                 </span>
@@ -494,7 +548,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Target Completed
                 </span>
@@ -506,7 +560,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Days Below Target
                 </span>
@@ -518,7 +572,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Total Overtime
                 </span>
@@ -541,7 +595,7 @@ export function ReportsView() {
             </div>
 
             {/* Weekly Daily Breakdown Chart */}
-            <Card className="bg-card/40 border-white/5 p-5">
+            <Card className="bg-card/40 border-foreground/5 p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                   <Clock className="w-3.5 h-3.5 text-primary" />
@@ -576,7 +630,7 @@ export function ReportsView() {
                       className="flex flex-col items-center gap-2 group/bar"
                     >
                       {/* Bar Container */}
-                      <div className="w-full h-36 bg-muted/20 rounded-xl relative flex flex-col justify-end p-1 border border-white/5 overflow-hidden">
+                      <div className="w-full h-36 bg-muted/20 rounded-xl relative flex flex-col justify-end p-1 border border-foreground/5 overflow-hidden">
                         {/* Target Line if working day */}
                         {targetSec > 0 && (
                           <div
@@ -631,7 +685,7 @@ export function ReportsView() {
 
             {/* Weekly Empty State or Details */}
             {weeklyData.totalWorkingSeconds === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-card/20 rounded-2xl border border-dashed border-white/10">
+              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-card/20 rounded-2xl border border-dashed border-foreground/10">
                 <Clock className="w-6 h-6 text-muted-foreground/40" />
                 <p className="text-xs text-muted-foreground">
                   No sessions recorded for this week.
@@ -640,8 +694,8 @@ export function ReportsView() {
             ) : (
               <>
                 {/* Weekly Project Breakdown */}
-                <Card className="bg-card/40 border-white/5 overflow-hidden">
-                  <CardHeader className="p-4 pb-2 border-b border-white/5">
+                <Card className="bg-card/40 border-foreground/5 overflow-hidden">
+                  <CardHeader className="p-4 pb-2 border-b border-foreground/5">
                     <div className="flex items-center gap-2">
                       <FolderOpen className="w-4 h-4 text-primary" />
                       <CardTitle className="text-sm font-bold tracking-tight">
@@ -653,10 +707,23 @@ export function ReportsView() {
                     {weeklyData.projects.map((proj) => (
                       <div
                         key={proj.projectName}
-                        className="p-4 space-y-2 hover:bg-white/[0.01] transition-colors"
+                        className="p-4 space-y-2 hover:bg-foreground/[0.01] transition-colors"
                       >
                         <div className="flex items-center justify-between text-sm">
                           <div className="flex items-center gap-2 min-w-0">
+                            {(() => {
+                              const color = groups.find(
+                                (g) => g.name === proj.projectName,
+                              )?.color;
+                              return color ? (
+                                <span
+                                  className={cn(
+                                    'w-2 h-2 rounded-full shrink-0',
+                                    TAG_SWATCH_CLASSES[color],
+                                  )}
+                                />
+                              ) : null;
+                            })()}
                             <span className="font-bold text-foreground truncate">
                               {proj.projectName}
                             </span>
@@ -685,8 +752,8 @@ export function ReportsView() {
                 </Card>
 
                 {/* Weekly Ticket Breakdown */}
-                <Card className="bg-card/40 border-white/5 overflow-hidden">
-                  <CardHeader className="p-4 pb-2 border-b border-white/5">
+                <Card className="bg-card/40 border-foreground/5 overflow-hidden">
+                  <CardHeader className="p-4 pb-2 border-b border-foreground/5">
                     <div className="flex items-center gap-2">
                       <Ticket className="w-4 h-4 text-primary" />
                       <CardTitle className="text-sm font-bold tracking-tight">
@@ -698,7 +765,7 @@ export function ReportsView() {
                     {weeklyData.tickets.map((t) => (
                       <div
                         key={`${t.projectName}-${t.taskName}`}
-                        className="p-4 flex items-center justify-between gap-4 hover:bg-white/[0.01] transition-colors"
+                        className="p-4 flex items-center justify-between gap-4 hover:bg-foreground/[0.01] transition-colors"
                       >
                         <div className="space-y-1 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -749,7 +816,7 @@ export function ReportsView() {
           >
             {/* Monthly Key Metrics */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Total Working Hours
                 </span>
@@ -761,7 +828,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Expected Working Hours
                 </span>
@@ -773,7 +840,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Average Daily Hours
                 </span>
@@ -785,7 +852,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Days Target Completed
                 </span>
@@ -797,7 +864,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Days Below Target
                 </span>
@@ -809,7 +876,7 @@ export function ReportsView() {
                 </span>
               </Card>
 
-              <Card className="bg-card/40 border-white/5 p-4 space-y-1">
+              <Card className="bg-card/40 border-foreground/5 p-4 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Total Overtime
                 </span>
@@ -833,7 +900,7 @@ export function ReportsView() {
 
             {/* Monthly Empty State or Details */}
             {monthlyData.totalWorkingSeconds === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-card/20 rounded-2xl border border-dashed border-white/10">
+              <div className="flex flex-col items-center justify-center py-12 text-center space-y-3 bg-card/20 rounded-2xl border border-dashed border-foreground/10">
                 <Clock className="w-6 h-6 text-muted-foreground/40" />
                 <p className="text-xs text-muted-foreground">
                   No task sessions recorded for {monthlyData.monthName}.
@@ -842,8 +909,8 @@ export function ReportsView() {
             ) : (
               <>
                 {/* Monthly Project Distribution */}
-                <Card className="bg-card/40 border-white/5 overflow-hidden">
-                  <CardHeader className="p-4 pb-2 border-b border-white/5">
+                <Card className="bg-card/40 border-foreground/5 overflow-hidden">
+                  <CardHeader className="p-4 pb-2 border-b border-foreground/5">
                     <div className="flex items-center gap-2">
                       <FolderOpen className="w-4 h-4 text-primary" />
                       <CardTitle className="text-sm font-bold tracking-tight">
@@ -855,10 +922,23 @@ export function ReportsView() {
                     {monthlyData.projects.map((proj) => (
                       <div
                         key={proj.projectName}
-                        className="p-4 space-y-2 hover:bg-white/[0.01] transition-colors"
+                        className="p-4 space-y-2 hover:bg-foreground/[0.01] transition-colors"
                       >
                         <div className="flex items-center justify-between text-sm">
                           <div className="flex items-center gap-2 min-w-0">
+                            {(() => {
+                              const color = groups.find(
+                                (g) => g.name === proj.projectName,
+                              )?.color;
+                              return color ? (
+                                <span
+                                  className={cn(
+                                    'w-2 h-2 rounded-full shrink-0',
+                                    TAG_SWATCH_CLASSES[color],
+                                  )}
+                                />
+                              ) : null;
+                            })()}
                             <span className="font-bold text-foreground truncate">
                               {proj.projectName}
                             </span>
@@ -887,8 +967,8 @@ export function ReportsView() {
                 </Card>
 
                 {/* Monthly Ticket Distribution */}
-                <Card className="bg-card/40 border-white/5 overflow-hidden">
-                  <CardHeader className="p-4 pb-2 border-b border-white/5">
+                <Card className="bg-card/40 border-foreground/5 overflow-hidden">
+                  <CardHeader className="p-4 pb-2 border-b border-foreground/5">
                     <div className="flex items-center gap-2">
                       <Ticket className="w-4 h-4 text-primary" />
                       <CardTitle className="text-sm font-bold tracking-tight">
@@ -900,7 +980,7 @@ export function ReportsView() {
                     {monthlyData.tickets.map((t) => (
                       <div
                         key={`${t.projectName}-${t.taskName}`}
-                        className="p-4 flex items-center justify-between gap-4 hover:bg-white/[0.01] transition-colors"
+                        className="p-4 flex items-center justify-between gap-4 hover:bg-foreground/[0.01] transition-colors"
                       >
                         <div className="space-y-1 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -946,6 +1026,13 @@ export function ReportsView() {
         onOpenChange={setExportOpen}
         defaultScope={activeTab === 'daily' ? 'day' : activeTab === 'weekly' ? 'week' : 'month'}
         defaultDate={currentDate}
+      />
+
+      <ShareReportDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        periodLabel={shareLabel}
+        snapshot={shareSnapshot}
       />
     </div>
   );

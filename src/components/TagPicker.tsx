@@ -155,7 +155,7 @@ export function TagPicker({ selectedIds, onToggle }: TagPickerProps) {
               maxHeight: position.maxHeight,
               transform: position.openUp ? 'translateY(-100%)' : undefined,
             }}
-            className="z-[100] flex flex-col rounded-xl border border-white/10 bg-card shadow-2xl p-2 gap-2 overflow-hidden"
+            className="z-[100] flex flex-col rounded-xl border border-foreground/10 bg-card shadow-2xl p-2 gap-2 overflow-hidden"
           >
             <Input
               ref={inputRef}
@@ -169,7 +169,7 @@ export function TagPicker({ selectedIds, onToggle }: TagPickerProps) {
               }}
               placeholder="Search or create…"
               maxLength={24}
-              className="h-8 bg-background/40 border-white/10 text-xs rounded-lg shrink-0"
+              className="h-8 bg-background/40 border-foreground/10 text-xs rounded-lg shrink-0"
             />
 
             <ul className="flex-1 min-h-0 overflow-y-auto space-y-0.5" role="listbox">
@@ -216,7 +216,7 @@ export function TagPicker({ selectedIds, onToggle }: TagPickerProps) {
             </ul>
 
             {canCreate && (
-              <div className="border-t border-white/5 pt-2 space-y-2 shrink-0">
+              <div className="border-t border-foreground/5 pt-2 space-y-2 shrink-0">
                 <div
                   role="radiogroup"
                   aria-label="New tag colour"
