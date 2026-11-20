@@ -47,7 +47,7 @@ export function TagFilterBar({
           }}
           placeholder="Filter tasks…  (press / )"
           aria-label="Filter tasks"
-          className="bg-muted/30 border-white/5 h-9 pl-9 pr-9 text-sm rounded-xl"
+          className="bg-muted/30 border-foreground/5 h-9 pl-9 pr-9 text-sm rounded-xl"
         />
         {isFiltering && (
           <Button
@@ -76,7 +76,7 @@ export function TagFilterBar({
                   'px-2.5 py-1 rounded-full border text-[10px] font-bold tracking-tight transition-all cursor-pointer',
                   active
                     ? TAG_CHIP_CLASSES[tag.color]
-                    : 'border-white/5 bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/40',
+                    : 'border-foreground/5 bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/40',
                 )}
               >
                 {tag.label}

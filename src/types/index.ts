@@ -43,6 +43,8 @@ export interface Group {
   tasks: Task[];
   expanded?: boolean;
   pinned?: boolean;
+  /** Unset reads as a neutral default, same as a task with no tags. */
+  color?: TagColor;
 }
 
 export interface CompletedTask {
@@ -77,6 +79,8 @@ export interface AppSettings {
   timerReminderEnabled: boolean;
   /** Minutes between reminder sounds while a timer runs. */
   timerReminderMinutes: number;
+  /** Defaults to 'dark' to preserve the app's original always-dark look. */
+  theme: 'light' | 'dark';
 }
 
 export type TargetStatus = 'below' | 'completed' | 'overtime';

@@ -49,6 +49,7 @@ import {
   pinnedFirst,
   removeTagFromTasks,
   toggleGroupPinned as toggleGroupPinnedIn,
+  setGroupColor as setGroupColorIn,
 } from '@/lib/taskMutations';
 import type { UserDbData } from '../lib/supabaseDb';
 
@@ -109,6 +110,7 @@ interface AppContextValue {
   reorderGroups: (startIndex: number, endIndex: number) => void;
   toggleGroupExpanded: (groupId: string) => void;
   toggleGroupPinned: (groupId: string) => void;
+  setGroupColor: (groupId: string, color: TagColor) => void;
   addTask: (groupId: string, name: string) => void;
   reorderTasks: (groupId: string, startIndex: number, endIndex: number) => void;
   updateTaskElapsed: (
@@ -736,6 +738,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           newSettings.timerReminderMinutes > 0
             ? newSettings.timerReminderMinutes
             : prev.timerReminderMinutes,
+        theme: newSettings.theme ?? prev.theme,
       }));
     },
     [settingsState],
@@ -802,6 +805,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const toggleGroupPinned = useCallback(
     (groupId: string) => {
       groupsState.commit((prev) => toggleGroupPinnedIn(prev, groupId));
+    },
+    [groupsState],
+  );
+
+  const setGroupColor = useCallback(
+    (groupId: string, color: TagColor) => {
+      groupsState.commit((prev) => setGroupColorIn(prev, groupId, color));
     },
     [groupsState],
   );
@@ -1382,6 +1392,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       reorderGroups,
       toggleGroupExpanded,
       toggleGroupPinned,
+      setGroupColor,
       addTask,
       reorderTasks,
       updateTaskElapsed,
@@ -1440,6 +1451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       reorderGroups,
       toggleGroupExpanded,
       toggleGroupPinned,
+      setGroupColor,
       addTask,
       reorderTasks,
       updateTaskElapsed,

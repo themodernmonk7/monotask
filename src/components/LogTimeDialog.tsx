@@ -96,7 +96,7 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-card border-white/10 backdrop-blur-xl">
+      <DialogContent className="sm:max-w-md bg-card border-foreground/10 backdrop-blur-xl">
         <DialogHeader>
           <div className="flex items-center gap-2 text-primary mb-1">
             <Clock className="w-5 h-5" />
@@ -119,7 +119,7 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
               id="log-task"
               value={taskKey}
               onChange={(e) => setTaskKey(e.target.value)}
-              className="w-full h-10 rounded-xl bg-card/50 border border-white/10 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              className="w-full h-10 rounded-xl bg-card/50 border border-foreground/10 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
             >
               <option value="">Select a task…</option>
               {groups.map((g) => (
@@ -152,7 +152,7 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
               value={day}
               max={format(new Date(), 'yyyy-MM-dd')}
               onChange={(e) => setDay(e.target.value)}
-              className="bg-card/50 border-white/10 h-10 rounded-xl"
+              className="bg-card/50 border-foreground/10 h-10 rounded-xl"
             />
           </div>
 
@@ -169,7 +169,7 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="bg-card/50 border-white/10 h-10 rounded-xl"
+                className="bg-card/50 border-foreground/10 h-10 rounded-xl"
               />
             </div>
             <div className="space-y-1.5">
@@ -184,7 +184,7 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="bg-card/50 border-white/10 h-10 rounded-xl"
+                className="bg-card/50 border-foreground/10 h-10 rounded-xl"
               />
             </div>
           </div>
@@ -202,7 +202,7 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               placeholder="What did you work on?"
-              className="bg-card/50 border-white/10 text-xs rounded-xl resize-y"
+              className="bg-card/50 border-foreground/10 text-xs rounded-xl resize-y"
             />
           </div>
 

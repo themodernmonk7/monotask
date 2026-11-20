@@ -20,6 +20,8 @@ import {
 import { cn } from '@/lib/utils';
 import { MAX_PINNED_GROUPS } from '@/types';
 import { TagFilterBar } from './TagFilterBar';
+import { GroupColorPicker } from './GroupColorPicker';
+import { GROUP_ACCENT_BORDER_CLASSES } from '@/lib/tagColors';
 import { onFocusSearch, onNewTask } from '@/lib/uiEvents';
 
 export function GroupList() {
@@ -32,6 +34,7 @@ export function GroupList() {
     toggleGroupExpanded,
     toggleGroupPinned,
     pinnedGroupCount,
+    setGroupColor,
     addTask,
     reorderTasks,
   } = useApp();
@@ -192,7 +195,7 @@ export function GroupList() {
       />
 
       {isFiltering && visibleGroups.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-white/10 bg-muted/10 p-8 text-center">
+        <div className="rounded-2xl border border-dashed border-foreground/10 bg-muted/10 p-8 text-center">
           <p className="text-sm font-medium text-foreground/80">No matching tasks</p>
           <p className="text-xs text-muted-foreground mt-1">
             Try a different search or clear the tag filters.
@@ -201,7 +204,7 @@ export function GroupList() {
             variant="outline"
             size="sm"
             onClick={clearFilters}
-            className="mt-4 rounded-lg border-white/10"
+            className="mt-4 rounded-lg border-foreground/10"
           >
             Clear filters
           </Button>
@@ -259,6 +262,10 @@ export function GroupList() {
                       'overflow-hidden border-border/40 shadow-sm hover:shadow-lg gap-0 py-0',
                       isExpanded ? 'bg-card shadow-lg' : 'bg-card/40',
                       group.pinned && 'border-amber-500/25',
+                      group.color && [
+                        'border-l-[3px]',
+                        GROUP_ACCENT_BORDER_CLASSES[group.color],
+                      ],
                       !isExpanded &&
                         isRunningInGroup &&
                         'running-group-highlight',
@@ -293,13 +300,9 @@ export function GroupList() {
                       </div>
 
                       <div className="flex-1 flex items-center gap-3 min-w-0">
-                        <FolderOpen
-                          className={cn(
-                            'w-4.5 h-4.5 transition-all duration-500',
-                            isExpanded || isRunningInGroup
-                              ? 'text-primary scale-110'
-                              : 'text-muted-foreground',
-                          )}
+                        <GroupColorPicker
+                          color={group.color}
+                          onPick={(color) => setGroupColor(group.id, color)}
                         />
                         <span
                           className={cn(
@@ -364,7 +367,7 @@ export function GroupList() {
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </AlertDialogTrigger>
-                        <AlertDialogContent className="bg-card border-white/5 backdrop-blur-xl">
+                        <AlertDialogContent className="bg-card border-foreground/5 backdrop-blur-xl">
                           <AlertDialogHeader>
                             <AlertDialogTitle>Delete Group?</AlertDialogTitle>
                             <AlertDialogDescription className="text-muted-foreground">

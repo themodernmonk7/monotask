@@ -1,4 +1,5 @@
 import type { Page, Route } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Supabase is mocked at the network layer so E2E needs no real project and no
@@ -24,6 +25,16 @@ export interface SeedData {
   tags: unknown[];
   user_settings: unknown;
   user_active_state: unknown;
+  shared_reports: Array<{
+    id: string;
+    user_id: string;
+    period_label: string;
+    report_type: string;
+    owner_name: string | null;
+    snapshot: unknown;
+    revoked: boolean;
+    created_at: string;
+  }>;
 }
 
 export function defaultSeed(): SeedData {
@@ -62,6 +73,7 @@ export function defaultSeed(): SeedData {
     note_groups: [
       { id: 'n-general', user_id: TEST_USER.id, title: 'General', notes: [], order_index: 0 },
     ],
+    shared_reports: [],
     tags: [
       { id: 'tag-deep', user_id: TEST_USER.id, label: 'Deep Work', color: 'violet' },
       { id: 'tag-meeting', user_id: TEST_USER.id, label: 'Meeting', color: 'sky' },
@@ -148,6 +160,19 @@ export async function mockSupabase(page: Page, seed: SeedData = defaultSeed()) {
       return;
     }
 
+    // RPC calls (currently only get_shared_report) go through their own path
+    // rather than the generic table read/write handling below, and model the
+    // real function's behaviour: it only ever returns a non-revoked row by
+    // exact id, never a list.
+    if (url.pathname === '/rest/v1/rpc/get_shared_report') {
+      const body = route.request().postDataJSON() as { share_id?: string };
+      const row = state.seed.shared_reports.find(
+        (r) => r.id === body.share_id && !r.revoked,
+      );
+      await json(route, row ?? null);
+      return;
+    }
+
     const table = url.pathname.replace('/rest/v1/', '');
 
     if (method === 'GET') {
@@ -169,6 +194,38 @@ export async function mockSupabase(page: Page, seed: SeedData = defaultSeed()) {
       }
     })();
     state.writes.push({ table, body });
+
+    // The real id is server-generated (DEFAULT gen_random_uuid()), never
+    // sent by the client — mirror that instead of falling through to the
+    // generic handler below, which would insert a row with no id at all.
+    if (method === 'POST' && table === 'shared_reports' && body) {
+      const row = {
+        id: randomUUID(),
+        revoked: false,
+        created_at: new Date().toISOString(),
+        ...(body as Record<string, unknown>),
+      };
+      state.seed.shared_reports.push(row as (typeof state.seed.shared_reports)[number]);
+      // The client chains .select('id').single(), which sets an Accept
+      // header real PostgREST honours by returning a bare object instead of
+      // a one-element array — mirror that, or supabase-js reads `data` as
+      // the array itself and `data.id` comes back undefined.
+      await json(route, row);
+      return;
+    }
+
+    if (method === 'PATCH' && table === 'shared_reports') {
+      const patch = body as Record<string, unknown> | null;
+      const id = url.searchParams.get('id')?.replace('eq.', '');
+      const userId = url.searchParams.get('user_id')?.replace('eq.', '');
+      state.seed.shared_reports = state.seed.shared_reports.map((r) =>
+        r.id === id && (!userId || r.user_id === userId) && patch
+          ? { ...r, ...patch }
+          : r,
+      );
+      await json(route, []);
+      return;
+    }
 
     if (method === 'POST' && body) {
       const incoming = (Array.isArray(body) ? body : [body]) as { id?: string }[];
@@ -198,5 +255,9 @@ export async function mockSupabase(page: Page, seed: SeedData = defaultSeed()) {
       state.offline = false;
     },
     writes: () => state.writes,
+    // Current state of any table, post-writes — simpler and more honest than
+    // reconstructing it from the write log for tables (like shared_reports)
+    // where the server assigns fields the client never sends.
+    getSeed: () => state.seed,
   };
 }

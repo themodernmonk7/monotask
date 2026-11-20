@@ -53,7 +53,7 @@ export function SessionList({ date }: SessionListProps) {
 
   if (dayEntries.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-white/10 bg-muted/10 p-6 text-center">
+      <div className="rounded-2xl border border-dashed border-foreground/10 bg-muted/10 p-6 text-center">
         <p className="text-xs text-muted-foreground">
           No recorded entries for this day.
         </p>
@@ -62,8 +62,8 @@ export function SessionList({ date }: SessionListProps) {
   }
 
   return (
-    <div className="rounded-2xl border border-white/5 bg-card/40 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
+    <div className="rounded-2xl border border-foreground/5 bg-card/40 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-foreground/5">
         <ListChecks className="w-4 h-4 text-primary" />
         <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
           Time entries
@@ -82,7 +82,7 @@ export function SessionList({ date }: SessionListProps) {
               key={entry.id}
               className={cn(
                 'flex items-center gap-3 px-4 py-2.5 group/entry transition-colors',
-                isEditing ? 'bg-primary/5' : 'hover:bg-white/[0.02]',
+                isEditing ? 'bg-primary/5' : 'hover:bg-foreground/[0.02]',
               )}
             >
               <div className="min-w-0 flex-1">

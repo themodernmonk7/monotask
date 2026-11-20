@@ -94,14 +94,14 @@ export function TimerController({
           )}
         </AnimatePresence>
 
-        <Separator orientation="vertical" className="h-5 bg-white/10" />
+        <Separator orientation="vertical" className="h-5 bg-foreground/10" />
 
         <div className="relative">
           <Button
             variant="ghost"
             size="icon"
             onClick={handleMarkDone}
-            className="h-8 w-8 rounded-lg border border-white/10 text-muted-foreground/60 hover:text-primary hover:border-primary/40 hover:bg-primary/10 transition-all"
+            className="h-8 w-8 rounded-lg border border-foreground/10 text-muted-foreground/60 hover:text-primary hover:border-primary/40 hover:bg-primary/10 transition-all"
             title="Mark as done"
             aria-label="Mark as done"
           >

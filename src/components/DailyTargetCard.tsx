@@ -48,7 +48,7 @@ export function DailyTargetCard() {
 
   return (
     <>
-      <Card className="relative overflow-hidden border-white/10 bg-card/60 backdrop-blur-xl shadow-xl mb-8 group/card">
+      <Card className="relative overflow-hidden border-foreground/10 bg-card/60 backdrop-blur-xl shadow-xl mb-8 group/card">
         {/* Subtle background glow based on status */}
         <div
           className={cn(
@@ -118,7 +118,7 @@ export function DailyTargetCard() {
               {status === 'below' && (
                 <Badge
                   variant="outline"
-                  className="bg-muted/40 border-white/10 text-muted-foreground font-medium px-2.5 py-1 text-xs gap-1.5"
+                  className="bg-muted/40 border-foreground/10 text-muted-foreground font-medium px-2.5 py-1 text-xs gap-1.5"
                 >
                   <AlertCircle className="w-3.5 h-3.5 text-primary/70" />
                   <span>Below target</span>
@@ -141,7 +141,7 @@ export function DailyTargetCard() {
           {/* Key Metrics Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {/* 1. Daily Target */}
-            <div className="bg-muted/20 border border-white/5 rounded-xl p-3 space-y-1">
+            <div className="bg-muted/20 border border-foreground/5 rounded-xl p-3 space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
                 Daily Target
               </span>
@@ -151,7 +151,7 @@ export function DailyTargetCard() {
             </div>
 
             {/* 2. Total Logged */}
-            <div className="bg-muted/20 border border-white/5 rounded-xl p-3 space-y-1">
+            <div className="bg-muted/20 border border-foreground/5 rounded-xl p-3 space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
                   Total Logged
@@ -174,7 +174,7 @@ export function DailyTargetCard() {
             </div>
 
             {/* 3. Remaining */}
-            <div className="bg-muted/20 border border-white/5 rounded-xl p-3 space-y-1">
+            <div className="bg-muted/20 border border-foreground/5 rounded-xl p-3 space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
                 Remaining
               </span>
@@ -194,7 +194,7 @@ export function DailyTargetCard() {
                 'border rounded-xl p-3 space-y-1 transition-colors',
                 overtimeSeconds > 0
                   ? 'bg-amber-500/10 border-amber-500/20'
-                  : 'bg-muted/20 border-white/5'
+                  : 'bg-muted/20 border-foreground/5'
               )}
             >
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
@@ -222,7 +222,7 @@ export function DailyTargetCard() {
               </span>
             </div>
 
-            <div className="h-3 w-full bg-muted/40 rounded-full overflow-hidden border border-white/5 p-0.5 relative">
+            <div className="h-3 w-full bg-muted/40 rounded-full overflow-hidden border border-foreground/5 p-0.5 relative">
               <motion.div
                 className={cn(
                   'h-full rounded-full transition-all duration-500',

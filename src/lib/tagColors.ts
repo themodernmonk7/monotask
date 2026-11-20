@@ -24,6 +24,16 @@ export const TAG_SWATCH_CLASSES: Record<TagColor, string> = {
   pink: 'bg-pink-400',
 };
 
+export const GROUP_ACCENT_BORDER_CLASSES: Record<TagColor, string> = {
+  slate: 'border-l-slate-400',
+  red: 'border-l-red-400',
+  amber: 'border-l-amber-400',
+  emerald: 'border-l-emerald-400',
+  sky: 'border-l-sky-400',
+  violet: 'border-l-violet-400',
+  pink: 'border-l-pink-400',
+};
+
 export const TAG_COLOR_LABELS: Record<TagColor, string> = {
   slate: 'Slate',
   red: 'Red',

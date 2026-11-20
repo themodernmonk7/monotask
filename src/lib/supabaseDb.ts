@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   workingDays: [1, 2, 3, 4, 5], // Monday - Friday
   timerReminderEnabled: false,
   timerReminderMinutes: 5,
+  theme: 'dark',
 };
 
 /** Every write returns its failure instead of swallowing it, so callers can roll back. */
@@ -75,6 +76,7 @@ export function normalizeSettings(raw: {
   working_days?: unknown;
   timer_reminder_enabled?: unknown;
   timer_reminder_minutes?: unknown;
+  theme?: unknown;
 }): AppSettings {
   return {
     dailyTargetMinutes:
@@ -95,6 +97,7 @@ export function normalizeSettings(raw: {
       typeof raw.timer_reminder_minutes === 'number' && raw.timer_reminder_minutes > 0
         ? raw.timer_reminder_minutes
         : DEFAULT_SETTINGS.timerReminderMinutes,
+    theme: raw.theme === 'light' ? 'light' : DEFAULT_SETTINGS.theme,
   };
 }
 
@@ -173,6 +176,9 @@ async function fetchUserDataInner(userId: string): Promise<{
       tasks: Array.isArray(row.tasks) ? row.tasks : [],
       expanded: row.expanded ?? true,
       pinned: row.pinned ?? false,
+      color: (TAG_COLORS as readonly string[]).includes(row.color)
+        ? (row.color as TagColor)
+        : undefined,
     }));
 
     const completedTasks: CompletedTask[] = (completedRes.data || []).map((row) => ({
@@ -287,6 +293,7 @@ export function persistGroups(userId: string, groups: Group[]): Promise<PersistR
       tasks: g.tasks,
       expanded: g.expanded ?? true,
       pinned: g.pinned ?? false,
+      color: g.color ?? null,
       order_index: index,
       updated_at: new Date().toISOString(),
     })),
@@ -385,6 +392,7 @@ export async function persistSettings(
         working_days: settings.workingDays,
         timer_reminder_enabled: settings.timerReminderEnabled,
         timer_reminder_minutes: settings.timerReminderMinutes,
+        theme: settings.theme,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' },

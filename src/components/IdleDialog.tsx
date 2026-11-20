@@ -26,7 +26,7 @@ export function IdleDialog() {
         if (!open && idlePrompt) resolveIdle('discard');
       }}
     >
-      <DialogContent className="sm:max-w-md bg-card border-white/10 backdrop-blur-xl">
+      <DialogContent className="sm:max-w-md bg-card border-foreground/10 backdrop-blur-xl">
         <DialogHeader>
           <div className="flex items-center gap-2 text-amber-400 mb-1">
             <Coffee className="w-5 h-5" />
@@ -60,7 +60,7 @@ export function IdleDialog() {
           <Button
             onClick={() => resolveIdle('discard')}
             variant="outline"
-            className="flex-1 rounded-xl gap-2 border-white/10"
+            className="flex-1 rounded-xl gap-2 border-foreground/10"
           >
             <Trash2 className="w-4 h-4" />
             Discard the time

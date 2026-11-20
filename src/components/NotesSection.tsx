@@ -85,10 +85,10 @@ function NoteItem({
     >
       <Card
         className={cn(
-          'flex flex-row items-start gap-4 px-4 py-3 transition-all duration-300 border-white/5 shadow-sm relative overflow-hidden ',
+          'flex flex-row items-start gap-4 px-4 py-3 transition-all duration-300 border-foreground/5 shadow-sm relative overflow-hidden ',
           note.checked
-            ? 'bg-white/1 opacity-60'
-            : 'bg-card/40 hover:bg-card/60 hover:shadow-lg hover:border-white/10',
+            ? 'bg-foreground/1 opacity-60'
+            : 'bg-card/40 hover:bg-card/60 hover:shadow-lg hover:border-foreground/10',
         )}
       >
         <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -103,7 +103,7 @@ function NoteItem({
               'relative flex items-center justify-center w-5 h-5 cursor-pointer rounded-lg border transition-all duration-500 shrink-0 mt-0.5',
               note.checked
                 ? 'bg-primary border-primary shadow-[0_0_10px_oklch(var(--primary)/30%)]'
-                : 'bg-background border-white/20 hover:border-primary/50',
+                : 'bg-background border-foreground/20 hover:border-primary/50',
             )}
           >
             <AnimatePresence>
@@ -194,7 +194,7 @@ function NoteItem({
                 <Trash2 className="w-3 h-3" />
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="bg-card border-white/5 backdrop-blur-xl">
+            <AlertDialogContent className="bg-card border-foreground/5 backdrop-blur-xl">
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete Note?</AlertDialogTitle>
                 <AlertDialogDescription className="text-muted-foreground">
@@ -341,7 +341,7 @@ function NoteGroupComponent({
             className="overflow-hidden"
           >
             <div className="space-y-3 md:pl-4">
-              <div className="relative bg-card/20 rounded-xl border border-white/5 focus-within:border-primary/20 transition-all p-2">
+              <div className="relative bg-card/20 rounded-xl border border-foreground/5 focus-within:border-primary/20 transition-all p-2">
                 <Textarea
                   value={newNoteText}
                   onChange={(e) => setNewNoteText(e.target.value)}
@@ -427,7 +427,7 @@ export function NotesSection() {
     <div className="space-y-12">
       {/* Quick Note / Flat Notes Area */}
       <div className="space-y-6">
-        <div className="relative group/input bg-card/20 rounded-2xl border border-white/5 p-2 focus-within:border-primary/20 transition-all duration-500 shadow-inner">
+        <div className="relative group/input bg-card/20 rounded-2xl border border-foreground/5 p-2 focus-within:border-primary/20 transition-all duration-500 shadow-inner">
           <Textarea
             value={newNoteText}
             onChange={(e) => setNewNoteText(e.target.value)}
@@ -474,7 +474,7 @@ export function NotesSection() {
         )}
       </div>
 
-      <div className="h-px bg-white/5 flex items-center justify-center">
+      <div className="h-px bg-foreground/5 flex items-center justify-center">
         <span className="bg-background px-4 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/30">
           Groups
         </span>
@@ -487,7 +487,7 @@ export function NotesSection() {
             value={newGroupTitle}
             onChange={(e) => setNewGroupTitle(e.target.value)}
             placeholder="Group notes..."
-            className="bg-card/40 border-white/5 focus-visible:ring-primary/20"
+            className="bg-card/40 border-foreground/5 focus-visible:ring-primary/20"
           />
           <Button type="submit" variant="secondary" className="shrink-0">
             <FolderPlus className="w-4 h-4 mr-2" />
