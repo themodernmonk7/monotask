@@ -9,7 +9,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Download,
   FileSpreadsheet,
@@ -33,6 +32,7 @@ import {
   formatDurationHuman,
 } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
+import { DatePicker, MonthPicker } from './DatePicker';
 
 export type ExportType = 'detailed' | 'summary';
 export type ExportScope = 'day' | 'week' | 'month' | 'custom';
@@ -272,11 +272,10 @@ export function CsvExportDialog({
                   <CalendarIcon className="w-3.5 h-3.5 text-primary" />
                   Select Date
                 </span>
-                <Input
-                  type="date"
+                <DatePicker
                   value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-card/50 border-foreground/10 font-mono text-sm"
+                  onChange={setSelectedDate}
+                  className="w-full text-sm"
                 />
               </div>
             )}
@@ -287,11 +286,10 @@ export function CsvExportDialog({
                   <CalendarIcon className="w-3.5 h-3.5 text-primary" />
                   Select any day in the target week
                 </span>
-                <Input
-                  type="date"
+                <DatePicker
                   value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-card/50 border-foreground/10 font-mono text-sm"
+                  onChange={setSelectedDate}
+                  className="w-full text-sm"
                 />
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Selected Week: {periodLabel}
@@ -305,11 +303,10 @@ export function CsvExportDialog({
                   <CalendarIcon className="w-3.5 h-3.5 text-primary" />
                   Select Month
                 </span>
-                <Input
-                  type="month"
+                <MonthPicker
                   value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="bg-card/50 border-foreground/10 font-mono text-sm"
+                  onChange={setSelectedMonth}
+                  className="w-full text-sm"
                 />
               </div>
             )}
@@ -318,20 +315,22 @@ export function CsvExportDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">From</span>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={customStart}
-                    onChange={(e) => setCustomStart(e.target.value)}
-                    className="bg-card/50 border-foreground/10 font-mono text-sm"
+                    onChange={setCustomStart}
+                    max={customEnd || undefined}
+                    displayFormat="MMM d, yyyy"
+                    className="w-full text-sm"
                   />
                 </div>
                 <div className="space-y-1">
                   <span className="text-xs text-muted-foreground">To</span>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={customEnd}
-                    onChange={(e) => setCustomEnd(e.target.value)}
-                    className="bg-card/50 border-foreground/10 font-mono text-sm"
+                    onChange={setCustomEnd}
+                    min={customStart || undefined}
+                    displayFormat="MMM d, yyyy"
+                    className="w-full text-sm"
                   />
                 </div>
               </div>

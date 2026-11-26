@@ -15,6 +15,7 @@ import type {
   DailyTargetProgress,
   TagColor,
   Tag,
+  Task,
 } from '../types';
 import {
   extractTicketId,
@@ -44,7 +45,6 @@ import {
   completedTaskIds,
   completionIdFor,
   migrateTaskBase,
-  recordedSecondsByTask,
   sessionIdFor,
   stripCompletedTasks,
   withDerivedElapsed,
@@ -168,6 +168,8 @@ interface AppContextValue {
 
   updateCompletedTaskName: (completedTaskId: string, name: string) => void;
   updateCompletedTask: (completedTaskId: string, totalSeconds: number) => void;
+  /** Move a completed task back to the task list, keeping all its time. */
+  reopenCompletedTask: (completedTaskId: string) => void;
 
   /** Manual time entry and corrections to recorded sessions. */
   addManualSession: (input: ManualSessionInput) => void;
@@ -192,6 +194,8 @@ export interface ManualSessionInput {
   startTime: number;
   endTime: number;
   notes?: string;
+  /** Also complete the task, dated when this work ended. */
+  completeTask?: boolean;
 }
 
 export interface SessionPatch {
@@ -1115,8 +1119,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [activeState, closeOpenSession, setIdlePrompt],
   );
 
-  const markTaskDone = useCallback(
-    (groupId: string, taskId: string) => {
+  /**
+   * Complete an open task. `requestedAt` is when it was finished: now for the
+   * Done button, the end of the entry when logging past work. The recorded
+   * date is never earlier than the task's last recorded session, so a task
+   * also worked on a later day (or still running) lands on that later day.
+   */
+  const completeTaskAt = useCallback(
+    (groupId: string, taskId: string, requestedAt: number) => {
       const group = groupsState.ref.current.find((g) => g.id === groupId);
       const task = group?.tasks.find((t) => t.id === taskId);
       if (!group || !task) return;
@@ -1128,8 +1138,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // The timer state is shared, so this is true even when the timer is
       // running on a different device — and this device closes its segment.
       const wasRunning = activeState.ref.current.runningTaskId === taskId;
-
-      offerUndo(`Completed “${task.name}”`);
 
       if (wasRunning) {
         const prompt = idlePromptRef.current;
@@ -1153,8 +1161,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       // Total = pre-session time + every recorded session (including the one
       // just closed). Derived, so it matches what the task showed.
-      const recorded =
-        recordedSecondsByTask(sessionsState.ref.current).get(taskId) ?? 0;
+      const own = sessionsState.ref.current.filter((sn) => sn.taskId === taskId);
+      const recorded = own.reduce((sum, sn) => sum + sn.durationSeconds, 0);
+      const lastWorked = own.reduce((latest, sn) => Math.max(latest, sn.endTime), 0);
 
       completedState.commit((prev) => [
         ...prev.filter((c) => c.id !== completedId),
@@ -1163,7 +1172,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           taskName: task.name,
           groupName: group.name,
           totalSeconds: (task.baseSeconds ?? 0) + recorded,
-          completedAt: now,
+          completedAt: Math.max(requestedAt, lastWorked),
           ticketId: extractTicketId(task.name) || undefined,
           notes: task.description,
         },
@@ -1182,10 +1191,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       closeOpenSession,
       completedState,
       groupsState,
-      offerUndo,
       sessionsState,
       setIdlePrompt,
     ],
+  );
+
+  const markTaskDone = useCallback(
+    (groupId: string, taskId: string) => {
+      const task = groupsState.ref.current
+        .find((g) => g.id === groupId)
+        ?.tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      offerUndo(`Completed “${task.name}”`);
+      completeTaskAt(groupId, taskId, Date.now());
+    },
+    [completeTaskAt, groupsState, offerUndo],
   );
 
   // ---------------------------------------------------------------------------
@@ -1225,10 +1245,86 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [completedState, sessionsState],
   );
 
+  const reopenCompletedTask = useCallback(
+    (completedTaskId: string) => {
+      const ct = completedState.ref.current.find((c) => c.id === completedTaskId);
+      if (!ct) return;
+
+      const tagged = sessionsState.ref.current.filter(
+        (sn) => sn.completedTaskId === completedTaskId,
+      );
+      // Same task id as before, so its time entries line up again.
+      const taskId = completedTaskId.startsWith('done-')
+        ? completedTaskId.slice('done-'.length)
+        : (tagged[0]?.taskId ?? generateId());
+
+      if (groupsState.ref.current.some((g) => g.tasks.some((t) => t.id === taskId))) {
+        return; // already open (e.g. reopened on another device)
+      }
+
+      // Time the completion holds beyond its entries (older counter time,
+      // or a total edited by hand) stays with the task, on the day it was
+      // completed, so the total doesn't change.
+      const taggedSeconds = tagged.reduce((sum, sn) => sum + sn.durationSeconds, 0);
+      const baseSeconds = Math.max(0, ct.totalSeconds - taggedSeconds);
+
+      const task: Task = {
+        id: taskId,
+        name: ct.taskName,
+        description: ct.notes,
+        elapsedSeconds: 0,
+        baseSeconds,
+        ...(baseSeconds > 0 ? { baseAt: ct.completedAt } : {}),
+        tagIds: [],
+      };
+
+      offerUndo(`Moved “${ct.taskName}” back to tasks`);
+
+      const targetGroup =
+        groupsState.ref.current.find((g) => g.name === ct.groupName) ??
+        groupsState.ref.current[0];
+
+      void (async () => {
+        // Order matters: the server strips any task that still has a
+        // completion, so the completion goes first.
+        await Promise.all([
+          completedState.commit((prev) => prev.filter((c) => c.id !== completedTaskId)),
+          sessionsState.commit((prev) =>
+            prev.some((sn) => sn.completedTaskId === completedTaskId)
+              ? prev.map((sn) =>
+                  sn.completedTaskId === completedTaskId
+                    ? { ...sn, completedTaskId: undefined }
+                    : sn,
+                )
+              : prev,
+          ),
+        ]);
+        await groupsState.commit((prev) =>
+          targetGroup && prev.some((g) => g.id === targetGroup.id)
+            ? prev.map((g) =>
+                g.id === targetGroup.id
+                  ? { ...g, expanded: true, tasks: [task, ...g.tasks] }
+                  : g,
+              )
+            : pinnedFirst([
+                ...prev,
+                { id: generateId(), name: ct.groupName, tasks: [task], expanded: true, pinned: false },
+              ]),
+        );
+      })();
+    },
+    [completedState, groupsState, offerUndo, sessionsState],
+  );
+
   // ---------------------------------------------------------------------------
   // Manual time entry & session corrections
   // ---------------------------------------------------------------------------
 
+  /**
+   * Log work done without the timer — on an existing task, or on a task that
+   * was never added. With `completeTask`, the task is also completed, dated
+   * when the work ended (so it shows on that day, not today).
+   */
   const addManualSession = useCallback(
     (input: ManualSessionInput) => {
       const start = Math.min(input.startTime, input.endTime);
@@ -1236,22 +1332,70 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const durationSeconds = Math.floor((end - start) / 1000);
       if (durationSeconds <= 0) return;
 
+      const name = input.taskName.trim();
+      if (!name) return;
+      const isNew = !input.taskId;
+      const taskId = input.taskId ?? generateId();
+      const group = groupsState.ref.current.find((g) => g.id === input.groupId);
+      const groupName = group?.name ?? input.groupName;
+
+      if (input.completeTask) offerUndo(`Logged and completed “${name}”`);
+
       const session: WorkSession = {
         id: generateId(),
-        taskId: input.taskId ?? `manual-${generateId()}`,
-        taskName: input.taskName,
-        groupName: input.groupName,
-        ticketId: extractTicketId(input.taskName) || undefined,
+        taskId,
+        taskName: name,
+        groupName,
+        ticketId: extractTicketId(name) || undefined,
         startTime: start,
         endTime: end,
         durationSeconds,
         notes: input.notes?.trim() || undefined,
+        completedTaskId: input.completeTask && isNew ? completionIdFor(taskId) : undefined,
       };
 
-      // The task's total is derived from its sessions, so this is all.
+      // The task's total is derived from its sessions, so this is all the
+      // time bookkeeping there is.
       sessionsState.commit((prev) => [session, ...prev]);
+
+      if (!isNew) {
+        if (input.completeTask && input.groupId) {
+          completeTaskAt(input.groupId, taskId, end);
+        }
+        return;
+      }
+
+      if (input.completeTask) {
+        // Finished work that was never on the list: straight to Completed.
+        completedState.commit((prev) => [
+          ...prev,
+          {
+            id: completionIdFor(taskId),
+            taskName: name,
+            groupName,
+            totalSeconds: durationSeconds,
+            completedAt: end,
+            ticketId: extractTicketId(name) || undefined,
+            notes: session.notes,
+          },
+        ]);
+      } else if (group) {
+        groupsState.commit((prev) =>
+          prev.map((g) =>
+            g.id === group.id
+              ? {
+                  ...g,
+                  tasks: [
+                    { id: taskId, name, elapsedSeconds: 0, baseSeconds: 0, tagIds: [] },
+                    ...g.tasks,
+                  ],
+                }
+              : g,
+          ),
+        );
+      }
     },
-    [sessionsState],
+    [completeTaskAt, completedState, groupsState, offerUndo, sessionsState],
   );
 
   const updateSession = useCallback(
@@ -1489,6 +1633,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       markTaskDone,
       updateCompletedTaskName,
       updateCompletedTask,
+      reopenCompletedTask,
       addManualSession,
       updateSession,
       removeSession,
@@ -1547,6 +1692,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       markTaskDone,
       updateCompletedTaskName,
       updateCompletedTask,
+      reopenCompletedTask,
       addManualSession,
       updateSession,
       removeSession,

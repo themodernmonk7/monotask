@@ -110,6 +110,12 @@ test.describe('Multiple devices', () => {
 
     // And after syncing, the desktop shows the laptop's time on that task.
     await resync(desktop)
-    await expect(row(desktop, 't-sync')).toContainText('00:30:01')
+    // 30:00 seeded + however long the laptop's entry turned out to be.
+    const recorded = (laptopSession as unknown as { duration_seconds: number }).duration_seconds
+    const total = 1800 + recorded
+    const hms = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60]
+      .map((n) => String(n).padStart(2, '0'))
+      .join(':')
+    await expect(row(desktop, 't-sync')).toContainText(hms)
   })
 })

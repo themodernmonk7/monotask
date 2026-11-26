@@ -2,9 +2,21 @@ import { useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { Clock, Plus, AlertCircle } from 'lucide-react';
 import { useApp } from '@/hooks/useApp';
+import { DatePicker } from './DatePicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +31,9 @@ interface LogTimeDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/** Select value for "this work wasn't on the list yet". */
+const NEW_TASK = '__new__';
+
 /** Combine a yyyy-MM-dd date and an HH:mm time into an epoch timestamp. */
 function toTimestamp(day: string, time: string): number | null {
   if (!day || !time) return null;
@@ -26,18 +41,28 @@ function toTimestamp(day: string, time: string): number | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
+const labelClass = 'text-[11px] font-bold uppercase tracking-wider text-muted-foreground';
+const fieldClass = 'w-full h-10 data-[size=default]:h-10 rounded-xl bg-card/50 border-foreground/10';
+
 /**
- * Log work that wasn't tracked live — the single most common real-world gap
- * in any timer, because people forget to press start.
+ * Log work that wasn't tracked live — because the timer wasn't started, or
+ * the task was never added at all. By default the task is also completed,
+ * dated when the work ended, so it shows under that day in Completed.
  */
 export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
   const { groups, addManualSession } = useApp();
 
   const [taskKey, setTaskKey] = useState('');
+  const [newTaskName, setNewTaskName] = useState('');
+  const [newTaskGroupId, setNewTaskGroupId] = useState('');
   const [day, setDay] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('10:00');
   const [notes, setNotes] = useState('');
+  const [completeTask, setCompleteTask] = useState(true);
+  // Set on submit (the clock can't be read during render); cleared on edit.
+  const [futureError, setFutureError] = useState<string | null>(null);
+  const clearFuture = () => setFutureError(null);
 
   const options = useMemo(
     () =>
@@ -53,7 +78,9 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
     [groups],
   );
 
+  const isNew = taskKey === NEW_TASK;
   const selected = options.find((o) => o.key === taskKey) ?? null;
+  const newTaskGroup = groups.find((g) => g.id === newTaskGroupId) ?? null;
 
   const start = toTimestamp(day, startTime);
   const end = toTimestamp(day, endTime);
@@ -62,37 +89,68 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
       ? Math.floor((end - start) / 1000)
       : 0;
 
-  const error =
-    !selected
-      ? 'Pick a task.'
-      : start === null || end === null
-        ? 'Enter a valid date and time.'
-        : end <= start
-          ? 'The end time must be after the start time.'
-          : null;
+  const error = !taskKey
+    ? 'Pick a task.'
+    : isNew && !newTaskName.trim()
+      ? 'Name the task.'
+      : isNew && !newTaskGroup
+        ? 'Pick a group.'
+        : start === null || end === null
+          ? 'Enter a valid date and time.'
+          : end <= start
+            ? 'The end time must be after the start time.'
+            : futureError;
 
   const reset = () => {
     setNotes('');
     setTaskKey('');
+    setNewTaskName('');
+    setCompleteTask(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (error || !selected || start === null || end === null) return;
+    if (error || start === null || end === null) return;
+    if (end > Date.now()) {
+      setFutureError("You can't log time that hasn't happened yet.");
+      return;
+    }
 
-    addManualSession({
-      groupId: selected.groupId,
-      taskId: selected.taskId,
-      taskName: selected.label,
-      groupName: selected.groupName,
-      startTime: start,
-      endTime: end,
-      notes,
-    });
+    if (isNew) {
+      if (!newTaskGroup) return;
+      addManualSession({
+        groupId: newTaskGroup.id,
+        taskName: newTaskName,
+        groupName: newTaskGroup.name,
+        startTime: start,
+        endTime: end,
+        notes,
+        completeTask,
+      });
+    } else {
+      if (!selected) return;
+      addManualSession({
+        groupId: selected.groupId,
+        taskId: selected.taskId,
+        taskName: selected.label,
+        groupName: selected.groupName,
+        startTime: start,
+        endTime: end,
+        notes,
+        completeTask,
+      });
+    }
 
     reset();
     onOpenChange(false);
   };
+
+  const dayLabel =
+    day === format(new Date(), 'yyyy-MM-dd')
+      ? 'today'
+      : day
+        ? format(new Date(`${day}T00:00`), 'MMM d')
+        : 'that day';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -103,97 +161,118 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
             <DialogTitle>Log time manually</DialogTitle>
           </div>
           <DialogDescription>
-            Forgot to start the timer? Add the session after the fact.
+            Forgot to start the timer, or never added the task? Add the work after the fact.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label
-              htmlFor="log-task"
-              className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
-            >
+            <label htmlFor="log-task" className={labelClass}>
               Task
             </label>
-            <select
-              id="log-task"
-              value={taskKey}
-              onChange={(e) => setTaskKey(e.target.value)}
-              className="w-full h-10 rounded-xl bg-card/50 border border-foreground/10 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-            >
-              <option value="">Select a task…</option>
-              {groups.map((g) => (
-                <optgroup key={g.id} label={g.name}>
-                  {g.tasks.map((t) => (
-                    <option key={t.id} value={`${g.id}::${t.id}`}>
-                      {t.name}
-                    </option>
+            <Select value={taskKey} onValueChange={setTaskKey}>
+              <SelectTrigger id="log-task" className={fieldClass}>
+                <SelectValue placeholder="Select a task…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NEW_TASK}>
+                  <Plus className="w-3.5 h-3.5" />
+                  New task…
+                </SelectItem>
+                {groups
+                  .filter((g) => g.tasks.length > 0)
+                  .map((g) => (
+                    <SelectGroup key={g.id}>
+                      <SelectSeparator />
+                      <SelectLabel>{g.name}</SelectLabel>
+                      {g.tasks.map((t) => (
+                        <SelectItem key={t.id} value={`${g.id}::${t.id}`}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   ))}
-                </optgroup>
-              ))}
-            </select>
-            {options.length === 0 && (
-              <p className="text-[11px] text-muted-foreground">
-                Add a task first — manual entries attach to an existing task.
-              </p>
-            )}
+              </SelectContent>
+            </Select>
           </div>
 
+          {isNew && (
+            <div className="grid grid-cols-[1fr_auto] gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="log-new-name" className={labelClass}>
+                  Task name
+                </label>
+                <Input
+                  id="log-new-name"
+                  value={newTaskName}
+                  onChange={(e) => setNewTaskName(e.target.value)}
+                  placeholder="What did you work on?"
+                  autoFocus
+                  className="h-10 rounded-xl bg-card/50 border-foreground/10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="log-new-group" className={labelClass}>
+                  Group
+                </label>
+                <Select value={newTaskGroupId} onValueChange={setNewTaskGroupId}>
+                  <SelectTrigger id="log-new-group" className={`${fieldClass} min-w-36`}>
+                    <SelectValue placeholder="Group…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groups.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <label
-              htmlFor="log-date"
-              className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
-            >
+            <label htmlFor="log-date" className={labelClass}>
               Date
             </label>
-            <Input
+            <DatePicker
               id="log-date"
-              type="date"
               value={day}
               max={format(new Date(), 'yyyy-MM-dd')}
-              onChange={(e) => setDay(e.target.value)}
-              className="bg-card/50 border-foreground/10 h-10 rounded-xl"
+              onChange={(d) => { setDay(d); clearFuture(); }}
+              className="w-full h-10 rounded-xl"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label
-                htmlFor="log-start"
-                className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
-              >
+              <label htmlFor="log-start" className={labelClass}>
                 Start
               </label>
               <Input
                 id="log-start"
                 type="time"
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={(e) => { setStartTime(e.target.value); clearFuture(); }}
                 className="bg-card/50 border-foreground/10 h-10 rounded-xl"
               />
             </div>
             <div className="space-y-1.5">
-              <label
-                htmlFor="log-end"
-                className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
-              >
+              <label htmlFor="log-end" className={labelClass}>
                 End
               </label>
               <Input
                 id="log-end"
                 type="time"
                 value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                onChange={(e) => { setEndTime(e.target.value); clearFuture(); }}
                 className="bg-card/50 border-foreground/10 h-10 rounded-xl"
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <label
-              htmlFor="log-notes"
-              className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
-            >
+            <label htmlFor="log-notes" className={labelClass}>
               Notes <span className="font-normal normal-case">(optional)</span>
             </label>
             <Textarea
@@ -205,6 +284,27 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
               className="bg-card/50 border-foreground/10 text-xs rounded-xl resize-y"
             />
           </div>
+
+          <label
+            htmlFor="log-complete"
+            className="flex items-start justify-between gap-3 rounded-xl border border-foreground/10 bg-muted/20 px-3 py-2.5 cursor-pointer"
+          >
+            <span className="space-y-0.5">
+              <span className="block text-sm font-medium">Mark task as completed</span>
+              <span className="block text-[11px] text-muted-foreground">
+                {completeTask
+                  ? `Shows under ${dayLabel} in Completed. If you also worked on it later, it's dated then.`
+                  : isNew
+                    ? 'Adds the task to the group with this time, still open.'
+                    : 'Adds the time; the task stays open.'}
+              </span>
+            </span>
+            <Switch
+              id="log-complete"
+              checked={completeTask}
+              onCheckedChange={setCompleteTask}
+            />
+          </label>
 
           <div className="flex items-center justify-between gap-3 pt-1">
             {error ? (
@@ -227,7 +327,7 @@ export function LogTimeDialog({ open, onOpenChange }: LogTimeDialogProps) {
               className="rounded-xl gap-2 font-bold shrink-0"
             >
               <Plus className="w-4 h-4" />
-              Log time
+              {completeTask ? 'Log & complete' : 'Log time'}
             </Button>
           </div>
         </form>
