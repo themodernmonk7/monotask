@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TimerController } from './TimerController';
+import { TaskEntries } from './TaskEntries';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/hooks/useApp';
 import { Trash2, Check, Pencil, Tag, X, AlignLeft, FolderInput } from 'lucide-react';
@@ -374,6 +375,8 @@ export function TaskItem({ groupId, task, isRunning }: TaskItemProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <TaskEntries taskId={taskId} className="pl-[18px]" />
 
       {/* Subtle background glow for running task */}
       {isRunning && (

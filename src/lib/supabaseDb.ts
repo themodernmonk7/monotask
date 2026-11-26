@@ -16,7 +16,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   timerReminderEnabled: false,
   timerReminderMinutes: 5,
   theme: 'dark',
+  timezone: 'UTC',
+  idlePushEnabled: true,
+  pendingReminderEnabled: false,
+  pendingReminderStart: '18:00',
+  pendingReminderIntervalMinutes: 30,
+  pendingReminderCount: 3,
 };
+
+const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+const inRange = (v: unknown, min: number, max: number): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 
 /** Every write returns its failure instead of swallowing it, so callers can roll back. */
 export type PersistResult = { error: string | null };
@@ -77,6 +87,12 @@ export function normalizeSettings(raw: {
   timer_reminder_enabled?: unknown;
   timer_reminder_minutes?: unknown;
   theme?: unknown;
+  timezone?: unknown;
+  idle_push_enabled?: unknown;
+  pending_reminder_enabled?: unknown;
+  pending_reminder_start?: unknown;
+  pending_reminder_interval_minutes?: unknown;
+  pending_reminder_count?: unknown;
 }): AppSettings {
   return {
     dailyTargetMinutes:
@@ -98,6 +114,26 @@ export function normalizeSettings(raw: {
         ? raw.timer_reminder_minutes
         : DEFAULT_SETTINGS.timerReminderMinutes,
     theme: raw.theme === 'light' ? 'light' : DEFAULT_SETTINGS.theme,
+    timezone:
+      typeof raw.timezone === 'string' && raw.timezone ? raw.timezone : DEFAULT_SETTINGS.timezone,
+    idlePushEnabled:
+      typeof raw.idle_push_enabled === 'boolean'
+        ? raw.idle_push_enabled
+        : DEFAULT_SETTINGS.idlePushEnabled,
+    pendingReminderEnabled:
+      typeof raw.pending_reminder_enabled === 'boolean'
+        ? raw.pending_reminder_enabled
+        : DEFAULT_SETTINGS.pendingReminderEnabled,
+    pendingReminderStart:
+      typeof raw.pending_reminder_start === 'string' && CLOCK.test(raw.pending_reminder_start)
+        ? raw.pending_reminder_start
+        : DEFAULT_SETTINGS.pendingReminderStart,
+    pendingReminderIntervalMinutes: inRange(raw.pending_reminder_interval_minutes, 5, 720)
+      ? raw.pending_reminder_interval_minutes
+      : DEFAULT_SETTINGS.pendingReminderIntervalMinutes,
+    pendingReminderCount: inRange(raw.pending_reminder_count, 1, 20)
+      ? raw.pending_reminder_count
+      : DEFAULT_SETTINGS.pendingReminderCount,
   };
 }
 
@@ -252,40 +288,95 @@ async function fetchUserDataInner(userId: string): Promise<{
   }
 }
 
+type Row = Record<string, unknown> & { id: string };
+
+/** JSON with object keys sorted at every depth, so key order never reads as a change. */
+export function stableStringify(value: unknown): string {
+  if (value === undefined) return 'null';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .filter((k) => obj[k] !== undefined)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
+    .join(',')}}`;
+}
+
+/** Comparison key for a row, ignoring bookkeeping columns. */
+function rowSignature(row: Row): string {
+  const { updated_at: _ignored, ...rest } = row;
+  void _ignored;
+  return stableStringify(rest);
+}
+
+export interface RowDiff {
+  upserts: Row[];
+  deletes: string[];
+}
+
 /**
- * Replace a whole collection for one user: upsert the current rows,
- * then delete anything the client no longer has. Keeps local deletes
- * from silently resurrecting on the next load.
+ * What has to be sent to move the server from `prev` to `next`.
+ *
+ * This replaced "upsert everything I have, delete everything I don't", which
+ * is only correct when one device ever writes. With two or three devices open,
+ * a device holding a stale copy would delete rows another device had just
+ * created (a session, a completion) and resurrect rows it had removed (a task
+ * that was completed elsewhere). Now:
+ *
+ *  - only rows that actually changed are upserted, and
+ *  - only rows this device itself saw and then removed are deleted.
+ *
+ * `prev === null` means "no trustworthy baseline" (e.g. started from the
+ * offline cache): upsert everything, delete nothing. Losing a delete is
+ * recoverable; deleting another device's work is not.
  */
-async function replaceCollection(
+export function diffRows(prev: Row[] | null, next: Row[]): RowDiff {
+  if (prev === null) return { upserts: next, deletes: [] };
+
+  const before = new Map(prev.map((r) => [r.id, rowSignature(r)]));
+  const nextIds = new Set(next.map((r) => r.id));
+
+  return {
+    upserts: next.filter((r) => before.get(r.id) !== rowSignature(r)),
+    deletes: prev.filter((r) => !nextIds.has(r.id)).map((r) => r.id),
+  };
+}
+
+async function syncRows(
   table: string,
   userId: string,
-  rows: Record<string, unknown>[],
-  ids: string[],
+  prev: Row[] | null,
+  next: Row[],
 ): Promise<PersistResult> {
+  const { upserts, deletes } = diffRows(prev, next);
   try {
-    if (rows.length > 0) {
+    if (upserts.length > 0) {
+      const stamped = upserts.map((r) =>
+        'updated_at' in r ? { ...r, updated_at: new Date().toISOString() } : r,
+      );
       const { error } = await supabase
         .from(table)
-        .upsert(rows, { onConflict: 'id,user_id' });
+        .upsert(stamped, { onConflict: 'id,user_id' });
       if (error) return { error: error.message };
     }
-
-    const base = supabase.from(table).delete().eq('user_id', userId);
-    const { error } = ids.length
-      ? await base.not('id', 'in', `(${ids.map((id) => `"${id}"`).join(',')})`)
-      : await base;
-
-    return { error: error ? error.message : null };
+    if (deletes.length > 0) {
+      const { error } = await supabase
+        .from(table)
+        .delete()
+        .eq('user_id', userId)
+        .in('id', deletes);
+      if (error) return { error: error.message };
+    }
+    return { error: null };
   } catch (err) {
     return { error: toMessage(err) };
   }
 }
 
-export function persistGroups(userId: string, groups: Group[]): Promise<PersistResult> {
-  return replaceCollection(
-    'groups',
-    userId,
+/** Maps a slice to its table rows; exported so diffs can be tested directly. */
+export const toRows = {
+  groups: (userId: string, groups: Group[]): Row[] =>
     groups.map((g, index) => ({
       id: g.id,
       user_id: userId,
@@ -295,19 +386,9 @@ export function persistGroups(userId: string, groups: Group[]): Promise<PersistR
       pinned: g.pinned ?? false,
       color: g.color ?? null,
       order_index: index,
-      updated_at: new Date().toISOString(),
+      updated_at: '',
     })),
-    groups.map((g) => g.id),
-  );
-}
-
-export function persistCompletedTasks(
-  userId: string,
-  tasks: CompletedTask[],
-): Promise<PersistResult> {
-  return replaceCollection(
-    'completed_tasks',
-    userId,
+  completedTasks: (userId: string, tasks: CompletedTask[]): Row[] =>
     tasks.map((t) => ({
       id: t.id,
       user_id: userId,
@@ -320,17 +401,7 @@ export function persistCompletedTasks(
       end_time: t.endTime || null,
       notes: t.notes || null,
     })),
-    tasks.map((t) => t.id),
-  );
-}
-
-export function persistSessions(
-  userId: string,
-  sessions: WorkSession[],
-): Promise<PersistResult> {
-  return replaceCollection(
-    'work_sessions',
-    userId,
+  sessions: (userId: string, sessions: WorkSession[]): Row[] =>
     sessions.map((s) => ({
       id: s.id,
       user_id: userId,
@@ -344,17 +415,7 @@ export function persistSessions(
       notes: s.notes || null,
       completed_task_id: s.completedTaskId || null,
     })),
-    sessions.map((s) => s.id),
-  );
-}
-
-export function persistNoteGroups(
-  userId: string,
-  noteGroups: NoteGroup[],
-): Promise<PersistResult> {
-  return replaceCollection(
-    'note_groups',
-    userId,
+  noteGroups: (userId: string, noteGroups: NoteGroup[]): Row[] =>
     noteGroups.map((g, index) => ({
       id: g.id,
       user_id: userId,
@@ -362,23 +423,18 @@ export function persistNoteGroups(
       notes: g.notes,
       order_index: index,
     })),
-    noteGroups.map((g) => g.id),
-  );
+  tags: (userId: string, tags: Tag[]): Row[] =>
+    tags.map((t) => ({ id: t.id, user_id: userId, label: t.label, color: t.color })),
+};
+
+function collectionWriter<T>(table: string, map: (userId: string, value: T) => Row[]) {
+  return (userId: string, next: T, prev: T | null): Promise<PersistResult> =>
+    syncRows(table, userId, prev === null ? null : map(userId, prev), map(userId, next));
 }
 
-export function persistTags(userId: string, tags: Tag[]): Promise<PersistResult> {
-  return replaceCollection(
-    'tags',
-    userId,
-    tags.map((t) => ({
-      id: t.id,
-      user_id: userId,
-      label: t.label,
-      color: t.color,
-    })),
-    tags.map((t) => t.id),
-  );
-}
+export const persistCompletedTasks = collectionWriter('completed_tasks', toRows.completedTasks);
+export const persistSessions = collectionWriter('work_sessions', toRows.sessions);
+export const persistTags = collectionWriter('tags', toRows.tags);
 
 export async function persistSettings(
   userId: string,
@@ -393,6 +449,12 @@ export async function persistSettings(
         timer_reminder_enabled: settings.timerReminderEnabled,
         timer_reminder_minutes: settings.timerReminderMinutes,
         theme: settings.theme,
+        timezone: settings.timezone,
+        idle_push_enabled: settings.idlePushEnabled,
+        pending_reminder_enabled: settings.pendingReminderEnabled,
+        pending_reminder_start: settings.pendingReminderStart,
+        pending_reminder_interval_minutes: settings.pendingReminderIntervalMinutes,
+        pending_reminder_count: settings.pendingReminderCount,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' },
@@ -423,3 +485,156 @@ export async function persistActiveState(
     return { error: toMessage(err) };
   }
 }
+
+/**
+ * Mark the running timer as still alive — but only if the server still says
+ * THIS timer (same task, same start) is the one running. A device that missed
+ * a pause, a switch or a completion made elsewhere must not write its stale
+ * timer back over it; this conditional update simply matches nothing.
+ */
+export async function touchActiveState(
+  userId: string,
+  runningTaskId: string,
+  activeSessionStart: number,
+  now: number,
+): Promise<PersistResult> {
+  try {
+    const { error } = await supabase
+      .from('user_active_state')
+      .update({ last_active_timestamp: now, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('running_task_id', runningTaskId)
+      .eq('active_session_start', activeSessionStart);
+    return { error: error ? error.message : null };
+  } catch (err) {
+    return { error: toMessage(err) };
+  }
+}
+
+type Child = { id: string } & Record<string, unknown>;
+
+/**
+ * Three-way merge of a nested list (a group's tasks, a note group's notes).
+ *
+ * Applies only what THIS device changed since `prev` onto what the server
+ * holds now, so concurrent edits from other devices survive:
+ *  - added here           -> added
+ *  - removed here         -> removed
+ *  - edited here          -> this version wins
+ *  - removed elsewhere    -> stays removed (never resurrected by a stale copy)
+ *  - added elsewhere      -> kept, at the top (where new items go)
+ */
+export function mergeChildren(server: Child[], prev: Child[], next: Child[]): Child[] {
+  const prevById = new Map(prev.map((c) => [c.id, c]));
+  const nextIds = new Set(next.map((c) => c.id));
+  const serverById = new Map(server.map((c) => [c.id, c]));
+
+  const addedElsewhere = server.filter((c) => !prevById.has(c.id) && !nextIds.has(c.id));
+
+  const mine: Child[] = [];
+  for (const c of next) {
+    const before = prevById.get(c.id);
+    if (!before) {
+      mine.push(c); // added here
+      continue;
+    }
+    const onServer = serverById.get(c.id);
+    if (!onServer) continue; // removed elsewhere: do not bring it back
+    mine.push(stableStringify(before) === stableStringify(c) ? onServer : c);
+  }
+
+  return [...addedElsewhere, ...mine];
+}
+
+/**
+ * Writer for tables whose rows embed a child list. Column-level, not
+ * row-level: a change that doesn't touch the children (pin, reorder,
+ * collapse, rename, colour) updates only those columns, and a change to the
+ * children is merged into the server's current list rather than replacing
+ * it. Otherwise one stale device toggling a group would overwrite every task
+ * in it with its own outdated copy.
+ */
+function nestedWriter<T>(
+  table: string,
+  childKey: string,
+  map: (userId: string, value: T) => Row[],
+) {
+  return async (userId: string, nextValue: T, prevValue: T | null): Promise<PersistResult> => {
+    const next = map(userId, nextValue);
+    const prev = prevValue === null ? null : map(userId, prevValue);
+    const { upserts, deletes } = diffRows(prev, next);
+    const prevById = new Map((prev ?? []).map((r) => [r.id, r]));
+
+    try {
+      const ids = upserts.map((r) => r.id);
+      let serverById = new Map<string, Row>();
+      if (ids.length > 0) {
+        const { data, error } = await supabase
+          .from(table)
+          .select(`id,${childKey}`)
+          .eq('user_id', userId)
+          .in('id', ids);
+        if (error) return { error: error.message };
+        serverById = new Map(((data ?? []) as unknown as Row[]).map((r) => [r.id, r]));
+      }
+
+      const inserts: Row[] = [];
+      for (const row of upserts) {
+        const server = serverById.get(row.id);
+        if (!server) {
+          // New here (or deleted elsewhere and edited here): write it whole.
+          inserts.push(row);
+          continue;
+        }
+
+        const before = prevById.get(row.id) ?? server;
+        const patch: Record<string, unknown> = {};
+        for (const [col, value] of Object.entries(row)) {
+          if (col === 'id' || col === 'user_id' || col === 'updated_at') continue;
+          if (stableStringify(before[col]) !== stableStringify(value)) patch[col] = value;
+        }
+        if (childKey in patch) {
+          patch[childKey] = mergeChildren(
+            (server[childKey] as Child[] | undefined) ?? [],
+            (before[childKey] as Child[] | undefined) ?? [],
+            (row[childKey] as Child[] | undefined) ?? [],
+          );
+        }
+        if (Object.keys(patch).length === 0) continue;
+        if ('updated_at' in row) patch.updated_at = new Date().toISOString();
+
+        const { error } = await supabase
+          .from(table)
+          .update(patch)
+          .eq('user_id', userId)
+          .eq('id', row.id);
+        if (error) return { error: error.message };
+      }
+
+      if (inserts.length > 0) {
+        const stamped = inserts.map((r) =>
+          'updated_at' in r ? { ...r, updated_at: new Date().toISOString() } : r,
+        );
+        const { error } = await supabase
+          .from(table)
+          .upsert(stamped, { onConflict: 'id,user_id' });
+        if (error) return { error: error.message };
+      }
+
+      if (deletes.length > 0) {
+        const { error } = await supabase
+          .from(table)
+          .delete()
+          .eq('user_id', userId)
+          .in('id', deletes);
+        if (error) return { error: error.message };
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: toMessage(err) };
+    }
+  };
+}
+
+export const persistGroups = nestedWriter('groups', 'tasks', toRows.groups);
+export const persistNoteGroups = nestedWriter('note_groups', 'notes', toRows.noteGroups);

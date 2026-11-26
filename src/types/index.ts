@@ -24,7 +24,16 @@ export interface Tag {
 export interface Task {
   id: string;
   name: string;
+  /**
+   * In the UI: the task's derived total (see lib/timeModel.ts). In storage:
+   * kept only so older app versions still read something sensible — current
+   * code never trusts the stored value except to migrate it once.
+   */
   elapsedSeconds: number;
+  /** Time that predates recorded sessions. Fixed once migrated. */
+  baseSeconds?: number;
+  /** When baseSeconds was migrated, so reports place it on one day, not "today" forever. */
+  baseAt?: number;
   description?: string;
   tagIds?: string[];
   /**
@@ -81,6 +90,17 @@ export interface AppSettings {
   timerReminderMinutes: number;
   /** Defaults to 'dark' to preserve the app's original always-dark look. */
   theme: 'light' | 'dark';
+  /** IANA zone the reminder times are in; kept in step with the device. */
+  timezone: string;
+  /** Push "were you working while away?" when a timer runs unattended. */
+  idlePushEnabled: boolean;
+  /** Push one summary of open tasks at set times. */
+  pendingReminderEnabled: boolean;
+  /** 'HH:mm', first reminder of the day. */
+  pendingReminderStart: string;
+  pendingReminderIntervalMinutes: number;
+  /** Reminders per day, at most. */
+  pendingReminderCount: number;
 }
 
 export type TargetStatus = 'below' | 'completed' | 'overtime';

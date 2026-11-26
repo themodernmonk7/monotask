@@ -48,6 +48,7 @@ import { useTargetNotification } from "./hooks/useTargetNotification"
 import { UndoToast } from "./components/UndoToast"
 import { IdleDialog } from "./components/IdleDialog"
 import { LogTimeDialog } from "./components/LogTimeDialog"
+import { deviceTimezone, refreshPushSubscription } from "./lib/push"
 
 type TabId = "tasks" | "completed" | "reports" | "notes"
 
@@ -242,6 +243,18 @@ function AppContent() {
     runningTask?.elapsedSeconds ?? 0,
     Boolean(runningTaskId),
   )
+
+  // Push reminders run on the server, which needs to know this device's
+  // subscription (browsers rotate them) and the user's time zone. The zone is
+  // only filled in when still the default, so two devices in different zones
+  // don't keep overwriting each other; saving Settings sets it explicitly.
+  useEffect(() => {
+    if (!user || isLoading) return
+    void refreshPushSubscription(user.id).catch(() => {})
+    if (settings.timezone === "UTC" && deviceTimezone() !== "UTC") {
+      updateSettings({ timezone: deviceTimezone() })
+    }
+  }, [user, isLoading, settings.timezone, updateSettings])
 
   useTargetNotification(
     todayProgress.loggedSeconds,

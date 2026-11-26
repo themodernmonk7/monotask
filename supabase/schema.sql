@@ -203,6 +203,117 @@ REVOKE ALL ON FUNCTION public.get_shared_report(UUID) FROM public;
 GRANT EXECUTE ON FUNCTION public.get_shared_report(UUID) TO anon, authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 9. Multi-device safety
+--
+-- Several devices can be signed in to one account at once. These make the
+-- server, not whichever device wrote last, the guard of two facts.
+-- ---------------------------------------------------------------------------
+
+-- (a) A completed task is never open again. A device holding a stale copy of
+--     a group (a timer still running there, or an older app version) used to
+--     write the group back with the task in it, resurrecting a task completed
+--     elsewhere. Completions are recognised by the deterministic id
+--     ('done-' || task id) and, for older ones, through the sessions
+--     attributed to them. SECURITY INVOKER: RLS still applies.
+CREATE INDEX IF NOT EXISTS work_sessions_user_task_idx
+  ON public.work_sessions (user_id, task_id);
+
+CREATE OR REPLACE FUNCTION public.strip_completed_tasks()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.tasks IS NULL OR jsonb_typeof(NEW.tasks) <> 'array' THEN
+    RETURN NEW;
+  END IF;
+
+  NEW.tasks := coalesce((
+    SELECT jsonb_agg(e.t ORDER BY e.ord)
+    FROM jsonb_array_elements(NEW.tasks) WITH ORDINALITY AS e(t, ord)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM public.completed_tasks c
+      WHERE c.user_id = NEW.user_id
+        AND (
+          c.id = 'done-' || (e.t->>'id')
+          OR c.id IN (
+            SELECT w.completed_task_id FROM public.work_sessions w
+            WHERE w.user_id = NEW.user_id
+              AND w.task_id = e.t->>'id'
+              AND w.completed_task_id IS NOT NULL
+          )
+        )
+    )
+  ), '[]'::jsonb);
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS groups_strip_completed_tasks ON public.groups;
+CREATE TRIGGER groups_strip_completed_tasks
+  BEFORE INSERT OR UPDATE OF tasks ON public.groups
+  FOR EACH ROW EXECUTE FUNCTION public.strip_completed_tasks();
+
+-- (b) Devices hear about each other's changes: add the app's tables to the
+--     realtime feed (RLS still decides who receives what).
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    FOREACH t IN ARRAY ARRAY['groups', 'completed_tasks', 'work_sessions', 'note_groups',
+                             'tags', 'user_settings', 'user_active_state'] LOOP
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+      ) THEN
+        EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+      END IF;
+    END LOOP;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 10. Push notifications
+--
+-- The send-reminders Edge Function runs every minute (see push-cron.sql) and
+-- sends Web Push to every device a user turned notifications on for.
+-- ---------------------------------------------------------------------------
+
+-- One row per (user, device). Keyed by both so a device that switches
+-- accounts never collides with another user's row under RLS.
+CREATE TABLE IF NOT EXISTS public.push_subscriptions (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  last_success_at TIMESTAMPTZ,
+  PRIMARY KEY (user_id, endpoint)
+);
+
+ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage own push subscriptions" ON public.push_subscriptions;
+CREATE POLICY "Users can manage own push subscriptions" ON public.push_subscriptions
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- What was sent, so each occasion is notified at most once however often the
+-- check runs. Written only by the Edge Function (service role): RLS on, and
+-- deliberately no policies, so clients can neither read nor write it.
+CREATE TABLE IF NOT EXISTS public.notification_log (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  PRIMARY KEY (user_id, kind, ref)
+);
+
+ALTER TABLE public.notification_log ENABLE ROW LEVEL SECURITY;
+
+-- ---------------------------------------------------------------------------
 -- Migrations for databases created before a column existed. Safe to re-run.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
@@ -210,4 +321,13 @@ ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_enabled
 ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_minutes INTEGER NOT NULL DEFAULT 5;
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS color TEXT;
 ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('light', 'dark'));
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC';
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS idle_push_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_start TEXT NOT NULL DEFAULT '18:00'
+  CHECK (pending_reminder_start ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$');
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_interval_minutes INTEGER NOT NULL DEFAULT 30
+  CHECK (pending_reminder_interval_minutes BETWEEN 5 AND 720);
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_count INTEGER NOT NULL DEFAULT 3
+  CHECK (pending_reminder_count BETWEEN 1 AND 20);
 -- END MONOTASK MIGRATIONS

@@ -203,3 +203,64 @@ export function applySessionPatch(
     deltaSeconds: durationSeconds - session.durationSeconds,
   };
 }
+
+/**
+ * Re-time a completed task's sessions so they sum to its edited total.
+ *
+ * Writing the new total onto EVERY session (what this used to do) multiplies
+ * the task's time by its session count, and stretches the sessions over each
+ * other — one 1h33m task with three sessions showed up as 4h38m in reports
+ * and the daily target. Instead, a raise extends only the latest session and a
+ * cut trims from the latest backwards, dropping sessions it empties. Sessions
+ * of other tasks are never touched.
+ */
+export function retimeCompletedTaskSessions(
+  sessions: WorkSession[],
+  completedTaskId: string,
+  newTotalSeconds: number,
+): WorkSession[] {
+  const own = sessions
+    .filter((s) => s.completedTaskId === completedTaskId)
+    .sort((a, b) => b.startTime - a.startTime); // latest first
+  if (own.length === 0) return sessions;
+
+  const recorded = own.reduce((sum, s) => sum + s.durationSeconds, 0);
+  const target = Math.max(0, Math.floor(newTotalSeconds));
+  if (recorded === target) return sessions;
+
+  const replaced = new Map<string, WorkSession | null>();
+
+  if (target > recorded) {
+    const latest = own[0];
+    const durationSeconds = latest.durationSeconds + (target - recorded);
+    replaced.set(latest.id, {
+      ...latest,
+      durationSeconds,
+      endTime: latest.startTime + durationSeconds * 1000,
+    });
+  } else {
+    let toRemove = recorded - target;
+    for (const s of own) {
+      if (toRemove <= 0) break;
+      const cut = Math.min(s.durationSeconds, toRemove);
+      toRemove -= cut;
+      const durationSeconds = s.durationSeconds - cut;
+      replaced.set(
+        s.id,
+        durationSeconds > 0
+          ? { ...s, durationSeconds, endTime: s.startTime + durationSeconds * 1000 }
+          : null,
+      );
+    }
+  }
+
+  const next: WorkSession[] = [];
+  for (const s of sessions) {
+    if (!replaced.has(s.id)) next.push(s);
+    else {
+      const r = replaced.get(s.id);
+      if (r) next.push(r);
+    }
+  }
+  return next;
+}

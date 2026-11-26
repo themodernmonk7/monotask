@@ -15,6 +15,7 @@ import type {
   DailyTargetProgress,
   TagColor,
   Tag,
+  Task,
 } from '../types';
 import {
   extractTicketId,
@@ -32,6 +33,7 @@ import {
   persistSessions,
   persistSettings,
   persistTags,
+  touchActiveState,
 } from '../lib/supabaseDb';
 import type { ActiveState } from '../lib/supabaseDb';
 import { useOptimisticState } from '@/hooks/useOptimisticState';
@@ -39,22 +41,49 @@ import type { PersistGate } from '@/hooks/useOptimisticState';
 import { SyncQueue, isTransientError } from '@/lib/syncQueue';
 import { readCache, writeCache } from '@/lib/localCache';
 import { deriveAllSessions } from '@/lib/sessionDerivation';
-import { resolveIdleAdjustment } from '@/lib/idleResolution';
 import {
-  adjustTaskElapsed as adjustTaskElapsedIn,
+  completedTaskIds,
+  completionIdFor,
+  migrateTaskBase,
+  sessionIdFor,
+  stripCompletedTasks,
+  withDerivedElapsed,
+} from '@/lib/timeModel';
+import { supabase } from '@/lib/supabase';
+import {
   applySessionPatch,
   mapTask,
   migrateLegacyTags,
   moveTaskBetweenGroups,
   pinnedFirst,
   removeTagFromTasks,
+  retimeCompletedTaskSessions,
   toggleGroupPinned as toggleGroupPinnedIn,
   setGroupColor as setGroupColorIn,
 } from '@/lib/taskMutations';
 import type { UserDbData } from '../lib/supabaseDb';
 
-/** How often running-timer progress is checkpointed to the server. */
+/** How often a running timer tells the server it is still alive. */
 const HEARTBEAT_MS = 30_000;
+
+/**
+ * Backstop re-sync while the app is visible, for changes the realtime feed
+ * cannot report (deletions) or missed while its socket was asleep.
+ */
+const POLL_MS = 60_000;
+
+/** Coalesces a burst of realtime events into one refetch. */
+const SYNC_DEBOUNCE_MS = 600;
+
+const SYNCED_TABLES = [
+  'groups',
+  'completed_tasks',
+  'work_sessions',
+  'note_groups',
+  'tags',
+  'user_settings',
+  'user_active_state',
+] as const;
 
 /**
  * A running timer the app finds still going after a gap this long asks before
@@ -113,11 +142,6 @@ interface AppContextValue {
   setGroupColor: (groupId: string, color: TagColor) => void;
   addTask: (groupId: string, name: string) => void;
   reorderTasks: (groupId: string, startIndex: number, endIndex: number) => void;
-  updateTaskElapsed: (
-    groupId: string,
-    taskId: string,
-    elapsedSeconds: number,
-  ) => void;
   updateTaskName: (groupId: string, taskId: string, name: string) => void;
   updateTaskDescription: (
     groupId: string,
@@ -144,6 +168,8 @@ interface AppContextValue {
 
   updateCompletedTaskName: (completedTaskId: string, name: string) => void;
   updateCompletedTask: (completedTaskId: string, totalSeconds: number) => void;
+  /** Move a completed task back to the task list, keeping all its time. */
+  reopenCompletedTask: (completedTaskId: string) => void;
 
   /** Manual time entry and corrections to recorded sessions. */
   addManualSession: (input: ManualSessionInput) => void;
@@ -168,6 +194,8 @@ export interface ManualSessionInput {
   startTime: number;
   endTime: number;
   notes?: string;
+  /** Also complete the task, dated when this work ended. */
+  completeTask?: boolean;
 }
 
 export interface SessionPatch {
@@ -180,16 +208,8 @@ export interface IdlePrompt {
   taskId: string;
   taskName: string;
   idleSeconds: number;
+  /** When the device last checked in; the live segment stops here until answered. */
   since: number;
-  /**
-   * True when the idle time is already inside the task's elapsedSeconds,
-   * false when it was never credited (a gap restored from the server, which
-   * is the only trigger left — see IDLE_THRESHOLD_SECONDS). Decides which
-   * way resolveIdle adjusts; kept as a field rather than assumed, so the
-   * arithmetic in idleResolution.ts stays correct if another trigger is ever
-   * added back.
-   */
-  alreadyCounted: boolean;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);
@@ -239,11 +259,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const gateRef = useRef<PersistGate>({ userId: null, ready: false });
+  /** Bumped on every local write attempt; a refetch that raced one is discarded. */
+  const writeEpochRef = useRef(0);
   // Marked the moment any write is attempted — see dirtySinceLoadRef.
   const markDirtyRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     markDirtyRef.current = () => {
       dirtySinceLoadRef.current = true;
+      writeEpochRef.current += 1;
     };
   }, []);
   const onSyncError = useRef<(message: string) => void>(() => {});
@@ -251,12 +274,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     onSyncError.current = (message: string) => setSyncError(message);
   }, []);
 
+  const inflightRef = useRef(0);
   const optimisticOptions = useMemo(
     () => ({
       gateRef,
       onErrorRef: onSyncError,
       queueRef,
       onWriteAttemptRef: markDirtyRef,
+      inflightRef,
     }),
     [],
   );
@@ -323,12 +348,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const idlePromptRef = useRef<IdlePrompt | null>(null);
-  const undoRestoreRef = useRef<(() => void) | null>(null);
+  const undoRestoreRef = useRef<(() => Promise<void>) | null>(null);
   const undoTimerRef = useRef<number | null>(null);
-  const pendingLegacyMigration = useRef(false);
   const timerRef = useRef<number | null>(null);
-  const startTimeRef = useRef<number | null>(null);
-  const baseSecondsRef = useRef<number>(0);
 
   // ---------------------------------------------------------------------------
   // Initial load — the single read path
@@ -345,83 +367,95 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setLoadError(null);
 
     const hydrate = (data: UserDbData, fromCache: boolean) => {
-      // Credit time that passed while the app was closed with a timer running.
-      const gapSeconds = data.activeState?.lastActiveTimestamp
-        ? Math.floor((Date.now() - data.activeState.lastActiveTimestamp) / 1000)
-        : 0;
-      const restoredRunningId = data.activeState?.runningTaskId ?? null;
+      const trusted = !fromCache;
+      const now = Date.now();
+      const serverActive = data.activeState ?? EMPTY_ACTIVE_STATE;
 
-      // Only credit a short gap automatically; anything longer gets confirmed,
-      // otherwise a timer left running overnight silently inflates the day.
-      const autoCredit =
-        Boolean(restoredRunningId) &&
-        gapSeconds > 0 &&
-        gapSeconds <= IDLE_THRESHOLD_SECONDS;
-
-      const credited =
-        autoCredit
-          ? data.groups.map((g) => ({
-              ...g,
-              tasks: g.tasks.map((t) =>
-                t.id === restoredRunningId
-                  ? { ...t, elapsedSeconds: t.elapsedSeconds + gapSeconds }
-                  : t,
-              ),
-            }))
-          : data.groups;
-
-      const { groups: migratedGroups, tags: migratedTags } = migrateLegacyTags(
-        credited,
+      // --- Normalise what was loaded -------------------------------------
+      // 1. Old counter model -> baseSeconds (once per task, ever).
+      // 2. Tasks completed on any device are not open, whatever a stale
+      //    device last wrote into its group.
+      // 3. Legacy embedded tags -> shared library.
+      const done = completedTaskIds(data.completedTasks, data.sessions);
+      const migrated = migrateTaskBase(data.groups, data.sessions, serverActive, now);
+      const stripped = stripCompletedTasks(migrated, done);
+      const { groups: tagMigratedGroups, tags: migratedTags } = migrateLegacyTags(
+        stripped,
         data.tags,
       );
+      const normalizedGroups = pinnedFirst(tagMigratedGroups);
 
-      groupsState.set(pinnedFirst(migratedGroups));
+      // A timer for a task that no longer exists (completed or deleted on
+      // another device) must stop here too.
+      const runningExists =
+        !serverActive.runningTaskId ||
+        normalizedGroups.some((g) =>
+          g.tasks.some((t) => t.id === serverActive.runningTaskId),
+        );
+      const normalizedActive = runningExists ? serverActive : EMPTY_ACTIVE_STATE;
 
-      if (
-        restoredRunningId &&
-        gapSeconds > IDLE_THRESHOLD_SECONDS &&
-        data.activeState?.lastActiveTimestamp
-      ) {
-        const runningTask = data.groups
-          .flatMap((g) => g.tasks)
-          .find((t) => t.id === restoredRunningId);
-        setIdlePrompt({
-          taskId: restoredRunningId,
-          taskName: runningTask?.name ?? 'your task',
-          idleSeconds: gapSeconds,
-          since: data.activeState.lastActiveTimestamp,
-          alreadyCounted: false,
-        });
-      }
-      tagsState.set(migratedTags);
-      if (migratedTags.length !== data.tags.length) {
-        // Legacy tags were hoisted out of tasks — push both sides back up.
-        pendingLegacyMigration.current = true;
-      }
-      completedState.set(data.completedTasks);
-      sessionsState.set(data.sessions);
-      noteGroupsState.set(
-        data.noteGroups.length
-          ? data.noteGroups
-          : [{ id: 'general', title: 'General', notes: [] }],
-      );
-      settingsState.set(data.settings);
-      activeState.set(data.activeState ?? EMPTY_ACTIVE_STATE);
+      // --- Baseline = exactly what the server holds ------------------------
+      groupsState.hydrate(data.groups, trusted);
+      tagsState.hydrate(data.tags, trusted);
+      completedState.hydrate(data.completedTasks, trusted);
+      sessionsState.hydrate(data.sessions, trusted);
+      noteGroupsState.hydrate(data.noteGroups, trusted);
+      settingsState.hydrate(data.settings, trusted);
+      activeState.hydrate(serverActive, trusted);
 
       // Reads are done; writes may now proceed. Deliberately true for a
       // cache-backed start too: edits must be accepted and queued, otherwise
       // working offline silently loses everything.
       gateRef.current = { userId: user.id, ready: true };
 
-      if (!fromCache && pendingLegacyMigration.current) {
-        pendingLegacyMigration.current = false;
-        tagsState.flush();
-        groupsState.flush();
+      // --- Push the normalisation as ordinary diffs ------------------------
+      void tagsState.commit(() => migratedTags);
+      void groupsState.commit(() => normalizedGroups);
+      if (!data.noteGroups.length) {
+        void noteGroupsState.commit(() => [
+          { id: 'general', title: 'General', notes: [] },
+        ]);
+      }
+      if (normalizedActive !== serverActive) {
+        void activeState.commit(() => normalizedActive);
+      }
+
+      // --- Idle check: only when the app is (re)opened, never on a re-sync --
+      // A background re-sync happens while the user is right here; the timer
+      // on another device checking in late is not "you were away".
+      if (silent) {
+        const prompt = idlePromptRef.current;
+        if (prompt && prompt.taskId !== normalizedActive.runningTaskId) {
+          setIdlePrompt(null); // that timer was stopped elsewhere
+        }
+        return;
+      }
+
+      const lastSeen = normalizedActive.lastActiveTimestamp;
+      const gapSeconds = lastSeen ? Math.floor((now - lastSeen) / 1000) : 0;
+      if (normalizedActive.runningTaskId && lastSeen && gapSeconds > IDLE_THRESHOLD_SECONDS) {
+        const runningTask = normalizedGroups
+          .flatMap((g) => g.tasks)
+          .find((t) => t.id === normalizedActive.runningTaskId);
+        setIdlePrompt({
+          taskId: normalizedActive.runningTaskId,
+          taskName: runningTask?.name ?? 'your task',
+          idleSeconds: gapSeconds,
+          since: lastSeen,
+        });
       }
     };
 
+    const epochAtFetch = writeEpochRef.current;
     fetchUserData(user.id).then(({ data, error, tablesMissing: missing }) => {
       if (!alive) return;
+
+      // A background re-sync that raced a local edit would hand back rows
+      // from before that edit. Drop it and try again once writes settle.
+      if (silent && writeEpochRef.current !== epochAtFetch) {
+        requestSyncRef.current();
+        return;
+      }
 
       if (!silent) setIsLoading(false);
       setTablesMissing(missing);
@@ -496,90 +530,138 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groups, completedTasks, sessions, noteGroups, tags, settings, activeState.value]);
 
+  // ---------------------------------------------------------------------------
+  // Cross-device sync
+  //
+  // Up to several devices can be signed in at once. Each learns about the
+  // others' changes from the realtime feed (within about a second), backed by
+  // a re-sync whenever the app regains focus and a slow poll while visible —
+  // a sleeping laptop or phone drops its socket and misses events, and
+  // deletions are not reported over the filtered feed at all.
+  //
+  // A re-sync is a quiet full refetch. It waits until this device has no
+  // writes queued or in flight, otherwise it could hand back rows from before
+  // an edit that is still on its way.
+  // ---------------------------------------------------------------------------
+  const syncTimerRef = useRef<number | null>(null);
+  const requestSyncRef = useRef<() => void>(() => {});
+
   useEffect(() => {
-    const goOffline = () => setIsOffline(true);
+    const attempt = async () => {
+      syncTimerRef.current = null;
+      if (!gateRef.current.ready) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
 
-    const goOnline = async () => {
       const queue = queueRef.current;
-      // Read synchronously, before any await, and include the dirty flag: a
-      // retry may already have drained the queue, and refetching then would
-      // clobber the edit it just pushed.
-      const hadPendingEdits = queue.size > 0 || dirtySinceLoadRef.current;
-
-      if (hadPendingEdits) {
-        // Push local edits first — refetching would overwrite work done offline.
+      if (queue.size > 0) {
         await queue.flushNow();
-        if (queue.size === 0) {
-          setIsOffline(false);
-          setLastSyncedAt(Date.now());
-        }
+        if (queue.size > 0) return; // still can't reach the server
+        setIsOffline(false);
+        setLastSyncedAt(Date.now());
+      }
+      if (inflightRef.current > 0) {
+        syncTimerRef.current = window.setTimeout(attempt, 300);
         return;
       }
-
-      // Nothing local to push, so pull whatever changed elsewhere — quietly,
-      // without the UI flashing back to a full loading state.
       silentReloadRef.current = true;
       setReloadNonce((n) => n + 1);
     };
 
-    window.addEventListener('offline', goOffline);
-    window.addEventListener('online', goOnline);
+    requestSyncRef.current = () => {
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = window.setTimeout(attempt, SYNC_DEBOUNCE_MS);
+    };
+
     return () => {
-      window.removeEventListener('offline', goOffline);
-      window.removeEventListener('online', goOnline);
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+      requestSyncRef.current = () => {};
     };
   }, []);
+
+  useEffect(() => {
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => requestSyncRef.current();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') requestSyncRef.current();
+    };
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === 'visible') requestSyncRef.current();
+    }, POLL_MS);
+
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(poll);
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const userId = user.id;
+    const channel = supabase.channel(`monotask-sync-${userId}`);
+    for (const table of SYNCED_TABLES) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table, filter: `user_id=eq.${userId}` },
+        () => requestSyncRef.current(),
+      );
+    }
+    // (Re)subscribing — including after the socket reconnects — may have
+    // missed events, so catch up then too.
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') requestSyncRef.current();
+    });
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   // ---------------------------------------------------------------------------
   // Running timer — ticks locally, checkpoints on an interval
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!runningTaskId) {
+    if (!runningTaskId || !activeSessionStart) {
       if (timerRef.current) cancelAnimationFrame(timerRef.current);
-      startTimeRef.current = null;
       return;
     }
 
-    const task = groupsState.ref.current
-      .flatMap((g) => g.tasks)
-      .find((t) => t.id === runningTaskId);
-    baseSecondsRef.current = task ? task.elapsedSeconds : 0;
-    startTimeRef.current = Date.now();
-
-    let lastSecondReported = -1;
-
+    // The tick only moves the clock. Totals are derived from sessions plus
+    // the live segment, so nothing here writes task data — the old per-second
+    // counter, flushed with its whole group every 30s, is what let a stale
+    // device resurrect a task that was completed elsewhere.
+    let lastSecond = -1;
     const tick = () => {
-      if (!startTimeRef.current) return;
-
       const now = Date.now();
-      const totalElapsed =
-        baseSecondsRef.current +
-        Math.floor((now - startTimeRef.current) / 1000);
-
-      if (totalElapsed !== lastSecondReported) {
-        lastSecondReported = totalElapsed;
+      const second = Math.floor(now / 1000);
+      if (second !== lastSecond) {
+        lastSecond = second;
         setNowTimestamp(now);
-        // Local-only: a per-second write to Supabase would be absurd.
-        groupsState.set((prev) =>
-          prev.map((g) => ({
-            ...g,
-            tasks: g.tasks.map((t) =>
-              t.id === runningTaskId ? { ...t, elapsedSeconds: totalElapsed } : t,
-            ),
-          })),
-        );
-        activeState.set((prev) => ({ ...prev, lastActiveTimestamp: now }));
       }
-
       timerRef.current = requestAnimationFrame(tick);
     };
-
     timerRef.current = requestAnimationFrame(tick);
 
-    // Checkpoint so a crash or closed tab loses at most HEARTBEAT_MS.
+    // "Still running" check-in. Uses setInterval rather than the rAF tick so
+    // it keeps going in a background tab (throttled, but well inside the
+    // idle threshold). Conditional on the server agreeing this timer is the
+    // current one, so a device that missed a stop elsewhere can't revive it.
     const heartbeat = window.setInterval(() => {
-      groupsState.flush();
-      activeState.flush();
+      const userId = gateRef.current.userId;
+      if (!userId || !gateRef.current.ready) return;
+      // While "were you away?" is unanswered, the last check-in must stay
+      // where the user left, or a reload would silently count the gap.
+      if (idlePromptRef.current) return;
+      const now = Date.now();
+      activeState.set((prev) =>
+        prev.runningTaskId === runningTaskId ? { ...prev, lastActiveTimestamp: now } : prev,
+      );
+      void touchActiveState(userId, runningTaskId, activeSessionStart, now);
     }, HEARTBEAT_MS);
 
     return () => {
@@ -587,14 +669,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(heartbeat);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runningTaskId]);
+  }, [runningTaskId, activeSessionStart]);
 
-  // Persist accumulated timer progress when the tab goes away.
+  // Check in when the tab goes away, so a reopen measures the gap correctly.
   useEffect(() => {
     const checkpoint = () => {
-      if (!activeState.ref.current.runningTaskId) return;
-      groupsState.flush();
-      activeState.flush();
+      const { runningTaskId: id, activeSessionStart: start } = activeState.ref.current;
+      const userId = gateRef.current.userId;
+      if (!id || !start || !userId || !gateRef.current.ready) return;
+      if (idlePromptRef.current) return;
+      void touchActiveState(userId, id, start, Date.now());
     };
     // Checkpoint only — no idle prompt here. Being in another tab or app
     // while a timer runs is the normal, intended way to use the tracker.
@@ -636,15 +720,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const notesBefore = noteGroupsState.ref.current;
       const activeBefore = activeState.ref.current;
 
-      undoRestoreRef.current = () => {
+      undoRestoreRef.current = async () => {
         // commit() no-ops when the value is identical, so untouched slices
-        // cost nothing.
-        groupsState.commit(() => groupsBefore);
-        completedState.commit(() => completedBefore);
-        sessionsState.commit(() => sessionsBefore);
-        tagsState.commit(() => tagsBefore);
-        noteGroupsState.commit(() => notesBefore);
-        activeState.commit(() => activeBefore);
+        // cost nothing. Order matters for "undo complete": the completion
+        // and its session tags must be gone from the server BEFORE the task
+        // is written back, or the server-side guard (which strips completed
+        // tasks out of groups) would strip it again.
+        await Promise.all([
+          completedState.commit(() => completedBefore),
+          sessionsState.commit(() => sessionsBefore),
+        ]);
+        await Promise.all([
+          groupsState.commit(() => groupsBefore),
+          tagsState.commit(() => tagsBefore),
+          noteGroupsState.commit(() => notesBefore),
+          activeState.commit(() => activeBefore),
+        ]);
       };
 
       setUndoLabel(label);
@@ -662,54 +753,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  /** Keep a task's own counter in step when its recorded time changes. */
-  const adjustTaskElapsed = useCallback(
-    (taskId: string, deltaSeconds: number) => {
-      groupsState.commit((prev) => adjustTaskElapsedIn(prev, taskId, deltaSeconds));
-    },
-    [groupsState],
-  );
-
-  /**
-   * "keep" counts the away time; "discard" removes it. Discarding has to move
-   * activeSessionStart forward too, otherwise the live segment in allSessions
-   * would still cover the gap we just took back.
-   */
-  const resolveIdle = useCallback(
-    (decision: 'keep' | 'discard') => {
-      const prompt = idlePromptRef.current;
-      if (!prompt) return;
-      setIdlePrompt(null);
-
-      const now = Date.now();
-
-      const { elapsedDelta, restartLiveSegment } = resolveIdleAdjustment(
-        prompt,
-        decision,
-      );
-
-      if (elapsedDelta !== 0) {
-        adjustTaskElapsed(prompt.taskId, elapsedDelta);
-        if (elapsedDelta < 0) {
-          // The running tick derives from this base, so pull it back too.
-          baseSecondsRef.current = Math.max(
-            0,
-            baseSecondsRef.current + elapsedDelta,
-          );
-        }
-      }
-
-      activeState.commit((prev) => ({
-        ...prev,
-        lastActiveTimestamp: now,
-        ...(restartLiveSegment ? { activeSessionStart: now } : {}),
-      }));
-    },
-    [activeState, adjustTaskElapsed, setIdlePrompt],
-  );
-
   const undo = useCallback(() => {
-    undoRestoreRef.current?.();
+    void undoRestoreRef.current?.();
     clearUndo();
   }, [clearUndo]);
 
@@ -739,6 +784,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? newSettings.timerReminderMinutes
             : prev.timerReminderMinutes,
         theme: newSettings.theme ?? prev.theme,
+        timezone: newSettings.timezone ?? prev.timezone,
+        idlePushEnabled: newSettings.idlePushEnabled ?? prev.idlePushEnabled,
+        pendingReminderEnabled:
+          newSettings.pendingReminderEnabled ?? prev.pendingReminderEnabled,
+        pendingReminderStart: newSettings.pendingReminderStart ?? prev.pendingReminderStart,
+        pendingReminderIntervalMinutes:
+          newSettings.pendingReminderIntervalMinutes ?? prev.pendingReminderIntervalMinutes,
+        pendingReminderCount: newSettings.pendingReminderCount ?? prev.pendingReminderCount,
       }));
     },
     [settingsState],
@@ -848,15 +901,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           newTasks.splice(endIndex, 0, removed);
           return { ...g, tasks: newTasks };
         }),
-      );
-    },
-    [groupsState],
-  );
-
-  const updateTaskElapsed = useCallback(
-    (groupId: string, taskId: string, elapsedSeconds: number) => {
-      groupsState.commit((prev) =>
-        mapTask(prev, groupId, taskId, (t) => ({ ...t, elapsedSeconds })),
       );
     },
     [groupsState],
@@ -985,13 +1029,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [groupsState, sessionsState],
   );
 
-  /** Close out the live segment of whatever is running into a WorkSession. */
+  /**
+   * Close out the live segment of whatever is running into a WorkSession.
+   *
+   * The session id is derived from (task, segment start), so if two devices
+   * both close the same segment — each pausing a timer the other also saw —
+   * they write the same row instead of counting the time twice.
+   */
   const closeOpenSession = useCallback(
-    (now: number, completedTaskId?: string): void => {
+    (end: number, completedTaskId?: string): void => {
       const current = activeState.ref.current;
       if (!current.runningTaskId || !current.activeSessionStart) return;
 
-      const duration = Math.floor((now - current.activeSessionStart) / 1000);
+      const duration = Math.floor((end - current.activeSessionStart) / 1000);
       if (duration <= 0) return;
 
       const group = groupsState.ref.current.find((g) =>
@@ -1001,17 +1051,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!group || !task) return;
 
       const session: WorkSession = {
-        id: generateId(),
+        id: sessionIdFor(task.id, current.activeSessionStart),
         taskId: task.id,
         taskName: task.name,
         groupName: group.name,
         ticketId: extractTicketId(task.name) || undefined,
         startTime: current.activeSessionStart,
-        endTime: now,
+        endTime: end,
         durationSeconds: duration,
         completedTaskId,
       };
-      sessionsState.commit((prev) => [session, ...prev]);
+      void sessionsState.commit((prev) => [
+        session,
+        ...prev.filter((sn) => sn.id !== session.id),
+      ]);
     },
     [activeState, groupsState, sessionsState],
   );
@@ -1020,45 +1073,85 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (_groupId: string, taskId: string) => {
       const now = Date.now();
       const current = activeState.ref.current;
+      if (current.runningTaskId === taskId) return;
 
-      if (current.runningTaskId && current.runningTaskId !== taskId) {
-        closeOpenSession(now);
+      // Switching away from a timer whose "were you away?" is unanswered:
+      // the away time is not counted for it.
+      const prompt = idlePromptRef.current;
+      if (current.runningTaskId) {
+        closeOpenSession(prompt?.taskId === current.runningTaskId ? prompt.since : now);
       }
+      setIdlePrompt(null);
 
-      // Durably record the elapsed seconds accrued so far before switching.
-      groupsState.flush();
-
-      activeState.commit(() => ({
+      void activeState.commit(() => ({
         runningTaskId: taskId,
         lastActiveTimestamp: now,
         activeSessionStart: now,
       }));
     },
-    [activeState, closeOpenSession, groupsState],
+    [activeState, closeOpenSession, setIdlePrompt],
   );
 
   const pauseTask = useCallback(() => {
-    const now = Date.now();
-    closeOpenSession(now);
-    groupsState.flush();
-    activeState.commit(() => EMPTY_ACTIVE_STATE);
-  }, [activeState, closeOpenSession, groupsState]);
+    // While "were you working while away?" is unanswered, pausing means the
+    // away time wasn't work: end the segment where the user left.
+    const prompt = idlePromptRef.current;
+    const end = prompt ? prompt.since : Date.now();
+    setIdlePrompt(null);
+    closeOpenSession(end);
+    void activeState.commit(() => EMPTY_ACTIVE_STATE);
+  }, [activeState, closeOpenSession, setIdlePrompt]);
 
-  const markTaskDone = useCallback(
-    (groupId: string, taskId: string) => {
+  /**
+   * "keep" counts the away time — the live segment already spans it, so only
+   * the check-in moves. "discard" closes the segment where the user left and
+   * starts a fresh one now, so the gap is in no session at all.
+   */
+  const resolveIdle = useCallback(
+    (decision: 'keep' | 'discard') => {
+      const prompt = idlePromptRef.current;
+      if (!prompt) return;
+      setIdlePrompt(null);
+
+      const now = Date.now();
+      if (activeState.ref.current.runningTaskId !== prompt.taskId) return;
+
+      if (decision === 'discard') closeOpenSession(prompt.since);
+
+      void activeState.commit((prev) => ({
+        ...prev,
+        lastActiveTimestamp: now,
+        ...(decision === 'discard' ? { activeSessionStart: now } : {}),
+      }));
+    },
+    [activeState, closeOpenSession, setIdlePrompt],
+  );
+
+  /**
+   * Complete an open task. `requestedAt` is when it was finished: now for the
+   * Done button, the end of the entry when logging past work. The recorded
+   * date is never earlier than the task's last recorded session, so a task
+   * also worked on a later day (or still running) lands on that later day.
+   */
+  const completeTaskAt = useCallback(
+    (groupId: string, taskId: string, requestedAt: number) => {
       const group = groupsState.ref.current.find((g) => g.id === groupId);
       const task = group?.tasks.find((t) => t.id === taskId);
       if (!group || !task) return;
 
       const now = Date.now();
-      const completedId = generateId();
+      // Deterministic: if another device completes the same task, both
+      // completions land on one row instead of adding the time twice.
+      const completedId = completionIdFor(taskId);
+      // The timer state is shared, so this is true even when the timer is
+      // running on a different device — and this device closes its segment.
       const wasRunning = activeState.ref.current.runningTaskId === taskId;
 
-      offerUndo(`Completed “${task.name}”`);
-
       if (wasRunning) {
-        closeOpenSession(now, completedId);
-        activeState.commit(() => EMPTY_ACTIVE_STATE);
+        const prompt = idlePromptRef.current;
+        closeOpenSession(prompt?.taskId === taskId ? prompt.since : now, completedId);
+        setIdlePrompt(null);
+        void activeState.commit(() => EMPTY_ACTIVE_STATE);
       }
 
       // Attribute EVERY session for this task, not just the one being closed.
@@ -1074,14 +1167,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return changed ? next : prev;
       });
 
+      // Total = pre-session time + every recorded session (including the one
+      // just closed). Derived, so it matches what the task showed.
+      const own = sessionsState.ref.current.filter((sn) => sn.taskId === taskId);
+      const recorded = own.reduce((sum, sn) => sum + sn.durationSeconds, 0);
+      const lastWorked = own.reduce((latest, sn) => Math.max(latest, sn.endTime), 0);
+
       completedState.commit((prev) => [
-        ...prev,
+        ...prev.filter((c) => c.id !== completedId),
         {
           id: completedId,
           taskName: task.name,
           groupName: group.name,
-          totalSeconds: task.elapsedSeconds,
-          completedAt: now,
+          totalSeconds: (task.baseSeconds ?? 0) + recorded,
+          completedAt: Math.max(requestedAt, lastWorked),
           ticketId: extractTicketId(task.name) || undefined,
           notes: task.description,
         },
@@ -1100,9 +1199,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       closeOpenSession,
       completedState,
       groupsState,
-      offerUndo,
       sessionsState,
+      setIdlePrompt,
     ],
+  );
+
+  const markTaskDone = useCallback(
+    (groupId: string, taskId: string) => {
+      const task = groupsState.ref.current
+        .find((g) => g.id === groupId)
+        ?.tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      offerUndo(`Completed “${task.name}”`);
+      completeTaskAt(groupId, taskId, Date.now());
+    },
+    [completeTaskAt, groupsState, offerUndo],
   );
 
   // ---------------------------------------------------------------------------
@@ -1136,26 +1247,92 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ),
       );
       sessionsState.commit((prev) =>
-        prev.some((s) => s.completedTaskId === completedTaskId)
-          ? prev.map((s) =>
-              s.completedTaskId === completedTaskId
-                ? {
-                    ...s,
-                    durationSeconds: sanitized,
-                    endTime: s.startTime + sanitized * 1000,
-                  }
-                : s,
-            )
-          : prev,
+        retimeCompletedTaskSessions(prev, completedTaskId, sanitized),
       );
     },
     [completedState, sessionsState],
+  );
+
+  const reopenCompletedTask = useCallback(
+    (completedTaskId: string) => {
+      const ct = completedState.ref.current.find((c) => c.id === completedTaskId);
+      if (!ct) return;
+
+      const tagged = sessionsState.ref.current.filter(
+        (sn) => sn.completedTaskId === completedTaskId,
+      );
+      // Same task id as before, so its time entries line up again.
+      const taskId = completedTaskId.startsWith('done-')
+        ? completedTaskId.slice('done-'.length)
+        : (tagged[0]?.taskId ?? generateId());
+
+      if (groupsState.ref.current.some((g) => g.tasks.some((t) => t.id === taskId))) {
+        return; // already open (e.g. reopened on another device)
+      }
+
+      // Time the completion holds beyond its entries (older counter time,
+      // or a total edited by hand) stays with the task, on the day it was
+      // completed, so the total doesn't change.
+      const taggedSeconds = tagged.reduce((sum, sn) => sum + sn.durationSeconds, 0);
+      const baseSeconds = Math.max(0, ct.totalSeconds - taggedSeconds);
+
+      const task: Task = {
+        id: taskId,
+        name: ct.taskName,
+        description: ct.notes,
+        elapsedSeconds: 0,
+        baseSeconds,
+        ...(baseSeconds > 0 ? { baseAt: ct.completedAt } : {}),
+        tagIds: [],
+      };
+
+      offerUndo(`Moved “${ct.taskName}” back to tasks`);
+
+      const targetGroup =
+        groupsState.ref.current.find((g) => g.name === ct.groupName) ??
+        groupsState.ref.current[0];
+
+      void (async () => {
+        // Order matters: the server strips any task that still has a
+        // completion, so the completion goes first.
+        await Promise.all([
+          completedState.commit((prev) => prev.filter((c) => c.id !== completedTaskId)),
+          sessionsState.commit((prev) =>
+            prev.some((sn) => sn.completedTaskId === completedTaskId)
+              ? prev.map((sn) =>
+                  sn.completedTaskId === completedTaskId
+                    ? { ...sn, completedTaskId: undefined }
+                    : sn,
+                )
+              : prev,
+          ),
+        ]);
+        await groupsState.commit((prev) =>
+          targetGroup && prev.some((g) => g.id === targetGroup.id)
+            ? prev.map((g) =>
+                g.id === targetGroup.id
+                  ? { ...g, expanded: true, tasks: [task, ...g.tasks] }
+                  : g,
+              )
+            : pinnedFirst([
+                ...prev,
+                { id: generateId(), name: ct.groupName, tasks: [task], expanded: true, pinned: false },
+              ]),
+        );
+      })();
+    },
+    [completedState, groupsState, offerUndo, sessionsState],
   );
 
   // ---------------------------------------------------------------------------
   // Manual time entry & session corrections
   // ---------------------------------------------------------------------------
 
+  /**
+   * Log work done without the timer — on an existing task, or on a task that
+   * was never added. With `completeTask`, the task is also completed, dated
+   * when the work ended (so it shows on that day, not today).
+   */
   const addManualSession = useCallback(
     (input: ManualSessionInput) => {
       const start = Math.min(input.startTime, input.endTime);
@@ -1163,22 +1340,70 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const durationSeconds = Math.floor((end - start) / 1000);
       if (durationSeconds <= 0) return;
 
+      const name = input.taskName.trim();
+      if (!name) return;
+      const isNew = !input.taskId;
+      const taskId = input.taskId ?? generateId();
+      const group = groupsState.ref.current.find((g) => g.id === input.groupId);
+      const groupName = group?.name ?? input.groupName;
+
+      if (input.completeTask) offerUndo(`Logged and completed “${name}”`);
+
       const session: WorkSession = {
         id: generateId(),
-        taskId: input.taskId ?? `manual-${generateId()}`,
-        taskName: input.taskName,
-        groupName: input.groupName,
-        ticketId: extractTicketId(input.taskName) || undefined,
+        taskId,
+        taskName: name,
+        groupName,
+        ticketId: extractTicketId(name) || undefined,
         startTime: start,
         endTime: end,
         durationSeconds,
         notes: input.notes?.trim() || undefined,
+        completedTaskId: input.completeTask && isNew ? completionIdFor(taskId) : undefined,
       };
 
+      // The task's total is derived from its sessions, so this is all the
+      // time bookkeeping there is.
       sessionsState.commit((prev) => [session, ...prev]);
-      if (input.taskId) adjustTaskElapsed(input.taskId, durationSeconds);
+
+      if (!isNew) {
+        if (input.completeTask && input.groupId) {
+          completeTaskAt(input.groupId, taskId, end);
+        }
+        return;
+      }
+
+      if (input.completeTask) {
+        // Finished work that was never on the list: straight to Completed.
+        completedState.commit((prev) => [
+          ...prev,
+          {
+            id: completionIdFor(taskId),
+            taskName: name,
+            groupName,
+            totalSeconds: durationSeconds,
+            completedAt: end,
+            ticketId: extractTicketId(name) || undefined,
+            notes: session.notes,
+          },
+        ]);
+      } else if (group) {
+        groupsState.commit((prev) =>
+          prev.map((g) =>
+            g.id === group.id
+              ? {
+                  ...g,
+                  tasks: [
+                    { id: taskId, name, elapsedSeconds: 0, baseSeconds: 0, tagIds: [] },
+                    ...g.tasks,
+                  ],
+                }
+              : g,
+          ),
+        );
+      }
     },
-    [adjustTaskElapsed, sessionsState],
+    [completeTaskAt, completedState, groupsState, offerUndo, sessionsState],
   );
 
   const updateSession = useCallback(
@@ -1195,7 +1420,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         prev.map((sn) => (sn.id === sessionId ? updated : sn)),
       );
 
-      adjustTaskElapsed(existing.taskId, delta);
 
       // A completed task's headline total should follow its session.
       if (existing.completedTaskId && delta !== 0) {
@@ -1208,7 +1432,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       }
     },
-    [adjustTaskElapsed, completedState, sessionsState],
+    [completedState, sessionsState],
   );
 
   const removeSession = useCallback(
@@ -1218,7 +1442,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       offerUndo('Deleted time entry');
       sessionsState.commit((prev) => prev.filter((sn) => sn.id !== sessionId));
-      adjustTaskElapsed(existing.taskId, -existing.durationSeconds);
 
       if (existing.completedTaskId) {
         completedState.commit((prev) =>
@@ -1236,7 +1459,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
       }
     },
-    [adjustTaskElapsed, completedState, offerUndo, sessionsState],
+    [completedState, offerUndo, sessionsState],
   );
 
   // ---------------------------------------------------------------------------
@@ -1336,6 +1559,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ---------------------------------------------------------------------------
   // Derived reporting data
   // ---------------------------------------------------------------------------
+  // Until "were you working while away?" is answered, the live segment stops
+  // where the user left — unconfirmed time is never shown as worked.
+  const liveEnd = idlePrompt ? Math.min(idlePrompt.since, nowTimestamp) : nowTimestamp;
+
   const allSessions = useMemo<WorkSession[]>(
     () =>
       deriveAllSessions({
@@ -1345,8 +1572,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         runningTaskId,
         activeSession,
         now: nowTimestamp,
+        liveEnd,
       }),
-    [sessions, completedTasks, groups, runningTaskId, activeSession, nowTimestamp],
+    [sessions, completedTasks, groups, runningTaskId, activeSession, nowTimestamp, liveEnd],
+  );
+
+  /** What the UI shows: each task's elapsedSeconds is its derived total. */
+  const displayGroups = useMemo(
+    () => withDerivedElapsed(groups, sessions, activeSession, liveEnd),
+    [groups, sessions, activeSession, liveEnd],
   );
 
   const todayProgress = useMemo<DailyTargetProgress>(() => {
@@ -1364,7 +1598,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AppContextValue>(
     () => ({
-      groups,
+      groups: displayGroups,
       runningTaskId,
       completedTasks,
       noteGroups,
@@ -1395,7 +1629,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setGroupColor,
       addTask,
       reorderTasks,
-      updateTaskElapsed,
       updateTaskName,
       updateTaskDescription,
       createTag,
@@ -1408,6 +1641,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       markTaskDone,
       updateCompletedTaskName,
       updateCompletedTask,
+      reopenCompletedTask,
       addManualSession,
       updateSession,
       removeSession,
@@ -1425,7 +1659,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       removeNote,
     }),
     [
-      groups,
+      displayGroups,
       runningTaskId,
       completedTasks,
       noteGroups,
@@ -1454,7 +1688,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setGroupColor,
       addTask,
       reorderTasks,
-      updateTaskElapsed,
       updateTaskName,
       updateTaskDescription,
       createTag,
@@ -1467,6 +1700,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       markTaskDone,
       updateCompletedTaskName,
       updateCompletedTask,
+      reopenCompletedTask,
       addManualSession,
       updateSession,
       removeSession,
