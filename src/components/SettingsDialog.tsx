@@ -18,6 +18,7 @@ import { downloadBackup } from '@/lib/backup';
 import type { AppSettings } from '@/types';
 import { NotificationSettings, type NotificationDraft } from './NotificationSettings';
 import { deviceTimezone } from '@/lib/push';
+import { AppBadgeSetting } from './AppBadgeSetting';
 
 const REMINDER_PRESETS = [5, 10, 15, 30];
 
@@ -320,6 +321,8 @@ function SettingsForm({
         </div>
 
         <div className="h-px bg-foreground/5" />
+
+        <AppBadgeSetting />
 
         <NotificationSettings
           draft={notifications}

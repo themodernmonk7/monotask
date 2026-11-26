@@ -24,8 +24,7 @@ test.describe('Notification settings', () => {
     await expect(page.locator('#pending-push')).not.toBeChecked()
 
     await page.locator('#pending-push').click()
-    await page.getByLabel('First reminder time').click()
-    await page.getByRole('option', { name: '7:00 PM' }).click()
+    await page.getByLabel('First reminder time').fill('19:07')
     await page.getByLabel('Reminder interval').click()
     await page.getByRole('option', { name: '1 h', exact: true }).click()
     await page.getByLabel('Reminders per day').click()
@@ -39,7 +38,7 @@ test.describe('Notification settings', () => {
       .toMatchObject({
         idle_push_enabled: true,
         pending_reminder_enabled: true,
-        pending_reminder_start: '19:00',
+        pending_reminder_start: '19:07',
         pending_reminder_interval_minutes: 60,
         pending_reminder_count: 2,
         timezone: expect.stringMatching(IST),
