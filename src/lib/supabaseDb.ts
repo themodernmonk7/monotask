@@ -16,7 +16,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   timerReminderEnabled: false,
   timerReminderMinutes: 5,
   theme: 'dark',
+  timezone: 'UTC',
+  idlePushEnabled: true,
+  pendingReminderEnabled: false,
+  pendingReminderStart: '18:00',
+  pendingReminderIntervalMinutes: 30,
+  pendingReminderCount: 3,
 };
+
+const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+const inRange = (v: unknown, min: number, max: number): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 
 /** Every write returns its failure instead of swallowing it, so callers can roll back. */
 export type PersistResult = { error: string | null };
@@ -77,6 +87,12 @@ export function normalizeSettings(raw: {
   timer_reminder_enabled?: unknown;
   timer_reminder_minutes?: unknown;
   theme?: unknown;
+  timezone?: unknown;
+  idle_push_enabled?: unknown;
+  pending_reminder_enabled?: unknown;
+  pending_reminder_start?: unknown;
+  pending_reminder_interval_minutes?: unknown;
+  pending_reminder_count?: unknown;
 }): AppSettings {
   return {
     dailyTargetMinutes:
@@ -98,6 +114,26 @@ export function normalizeSettings(raw: {
         ? raw.timer_reminder_minutes
         : DEFAULT_SETTINGS.timerReminderMinutes,
     theme: raw.theme === 'light' ? 'light' : DEFAULT_SETTINGS.theme,
+    timezone:
+      typeof raw.timezone === 'string' && raw.timezone ? raw.timezone : DEFAULT_SETTINGS.timezone,
+    idlePushEnabled:
+      typeof raw.idle_push_enabled === 'boolean'
+        ? raw.idle_push_enabled
+        : DEFAULT_SETTINGS.idlePushEnabled,
+    pendingReminderEnabled:
+      typeof raw.pending_reminder_enabled === 'boolean'
+        ? raw.pending_reminder_enabled
+        : DEFAULT_SETTINGS.pendingReminderEnabled,
+    pendingReminderStart:
+      typeof raw.pending_reminder_start === 'string' && CLOCK.test(raw.pending_reminder_start)
+        ? raw.pending_reminder_start
+        : DEFAULT_SETTINGS.pendingReminderStart,
+    pendingReminderIntervalMinutes: inRange(raw.pending_reminder_interval_minutes, 5, 720)
+      ? raw.pending_reminder_interval_minutes
+      : DEFAULT_SETTINGS.pendingReminderIntervalMinutes,
+    pendingReminderCount: inRange(raw.pending_reminder_count, 1, 20)
+      ? raw.pending_reminder_count
+      : DEFAULT_SETTINGS.pendingReminderCount,
   };
 }
 
@@ -413,6 +449,12 @@ export async function persistSettings(
         timer_reminder_enabled: settings.timerReminderEnabled,
         timer_reminder_minutes: settings.timerReminderMinutes,
         theme: settings.theme,
+        timezone: settings.timezone,
+        idle_push_enabled: settings.idlePushEnabled,
+        pending_reminder_enabled: settings.pendingReminderEnabled,
+        pending_reminder_start: settings.pendingReminderStart,
+        pending_reminder_interval_minutes: settings.pendingReminderIntervalMinutes,
+        pending_reminder_count: settings.pendingReminderCount,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' },

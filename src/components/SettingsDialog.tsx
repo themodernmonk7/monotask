@@ -16,6 +16,8 @@ import { cn } from '@/lib/utils';
 import { playChime } from '@/lib/chime';
 import { downloadBackup } from '@/lib/backup';
 import type { AppSettings } from '@/types';
+import { NotificationSettings, type NotificationDraft } from './NotificationSettings';
+import { deviceTimezone } from '@/lib/push';
 
 const REMINDER_PRESETS = [5, 10, 15, 30];
 
@@ -61,6 +63,14 @@ function SettingsForm({
     () => settings.timerReminderMinutes
   );
 
+  const [notifications, setNotifications] = useState<NotificationDraft>(() => ({
+    idlePushEnabled: settings.idlePushEnabled,
+    pendingReminderEnabled: settings.pendingReminderEnabled,
+    pendingReminderStart: settings.pendingReminderStart,
+    pendingReminderIntervalMinutes: settings.pendingReminderIntervalMinutes,
+    pendingReminderCount: settings.pendingReminderCount,
+  }));
+
   const toggleDay = (day: number) => {
     setSelectedDays((prev) => {
       if (prev.includes(day)) {
@@ -84,6 +94,9 @@ function SettingsForm({
       workingDays: selectedDays,
       timerReminderEnabled: reminderEnabled,
       timerReminderMinutes: reminderMinutes,
+      ...notifications,
+      // Reminder times are meant in the zone of the device you set them on.
+      timezone: deviceTimezone(),
     });
   };
 
@@ -305,6 +318,14 @@ function SettingsForm({
             </div>
           )}
         </div>
+
+        <div className="h-px bg-foreground/5" />
+
+        <NotificationSettings
+          draft={notifications}
+          onChange={(next) => setNotifications((prev) => ({ ...prev, ...next }))}
+          timezone={deviceTimezone()}
+        />
 
         <div className="h-px bg-foreground/5" />
 

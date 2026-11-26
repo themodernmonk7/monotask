@@ -784,6 +784,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? newSettings.timerReminderMinutes
             : prev.timerReminderMinutes,
         theme: newSettings.theme ?? prev.theme,
+        timezone: newSettings.timezone ?? prev.timezone,
+        idlePushEnabled: newSettings.idlePushEnabled ?? prev.idlePushEnabled,
+        pendingReminderEnabled:
+          newSettings.pendingReminderEnabled ?? prev.pendingReminderEnabled,
+        pendingReminderStart: newSettings.pendingReminderStart ?? prev.pendingReminderStart,
+        pendingReminderIntervalMinutes:
+          newSettings.pendingReminderIntervalMinutes ?? prev.pendingReminderIntervalMinutes,
+        pendingReminderCount: newSettings.pendingReminderCount ?? prev.pendingReminderCount,
       }));
     },
     [settingsState],

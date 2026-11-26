@@ -1,6 +1,7 @@
 import { createContext, useEffect, useState, useMemo, useCallback } from 'react';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { disablePush } from '@/lib/push';
 
 export interface AuthContextValue {
   user: User | null;
@@ -81,9 +82,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // A signed-out device must stop receiving this account's reminders.
+    // Best effort: never block signing out on it.
+    if (user) await disablePush(user.id).catch(() => {});
     const { error } = await supabase.auth.signOut();
     return { error };
-  }, []);
+  }, [user]);
 
   const displayName = useMemo<string | null>(() => {
     if (!user) return null;

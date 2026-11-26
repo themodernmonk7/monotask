@@ -275,6 +275,45 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- 10. Push notifications
+--
+-- The send-reminders Edge Function runs every minute (see push-cron.sql) and
+-- sends Web Push to every device a user turned notifications on for.
+-- ---------------------------------------------------------------------------
+
+-- One row per (user, device). Keyed by both so a device that switches
+-- accounts never collides with another user's row under RLS.
+CREATE TABLE IF NOT EXISTS public.push_subscriptions (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  last_success_at TIMESTAMPTZ,
+  PRIMARY KEY (user_id, endpoint)
+);
+
+ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage own push subscriptions" ON public.push_subscriptions;
+CREATE POLICY "Users can manage own push subscriptions" ON public.push_subscriptions
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- What was sent, so each occasion is notified at most once however often the
+-- check runs. Written only by the Edge Function (service role): RLS on, and
+-- deliberately no policies, so clients can neither read nor write it.
+CREATE TABLE IF NOT EXISTS public.notification_log (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  PRIMARY KEY (user_id, kind, ref)
+);
+
+ALTER TABLE public.notification_log ENABLE ROW LEVEL SECURITY;
+
+-- ---------------------------------------------------------------------------
 -- Migrations for databases created before a column existed. Safe to re-run.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
@@ -282,4 +321,13 @@ ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_enabled
 ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timer_reminder_minutes INTEGER NOT NULL DEFAULT 5;
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS color TEXT;
 ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('light', 'dark'));
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC';
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS idle_push_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_start TEXT NOT NULL DEFAULT '18:00'
+  CHECK (pending_reminder_start ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$');
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_interval_minutes INTEGER NOT NULL DEFAULT 30
+  CHECK (pending_reminder_interval_minutes BETWEEN 5 AND 720);
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS pending_reminder_count INTEGER NOT NULL DEFAULT 3
+  CHECK (pending_reminder_count BETWEEN 1 AND 20);
 -- END MONOTASK MIGRATIONS

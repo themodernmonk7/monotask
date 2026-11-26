@@ -11,6 +11,11 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // A hand-written worker (src/sw.ts) so it can receive Web Push; the
+      // build still injects the precache manifest into it.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       // Only precache the built app shell (HTML/JS/CSS/icons) — app data
       // already has its own offline story (src/lib/localCache.ts), so the
       // service worker's job here is just "the app itself still opens
@@ -29,13 +34,10 @@ export default defineConfig({
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wav}'],
-        // The app is a single route rendered client-side; any navigation
-        // (including a deep link opened while offline) should fall back to
-        // the cached shell rather than a browser offline error page.
-        navigateFallback: '/index.html',
       },
+      // Offline navigation fallback to the cached shell lives in src/sw.ts.
     }),
   ],
   resolve: {

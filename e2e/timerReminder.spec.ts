@@ -12,7 +12,7 @@ test.describe('Timer reminder sound', () => {
     await expect(page.getByText('Timer Reminder')).toBeVisible()
 
     // Off by default.
-    const toggle = page.getByRole('switch')
+    const toggle = page.locator('#reminder-toggle')
     await expect(toggle).not.toBeChecked()
 
     await toggle.click()
@@ -49,7 +49,7 @@ test.describe('Timer reminder sound', () => {
     await page.getByText('Supabase sync refactor').waitFor()
 
     await page.getByTitle('Settings').click()
-    await page.getByRole('switch').click()
+    await page.locator('#reminder-toggle').click()
     await page.getByRole('button', { name: 'Preview sound' }).click()
 
     await expect

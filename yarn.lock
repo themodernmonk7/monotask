@@ -6638,7 +6638,7 @@ workbox-cacheable-response@7.4.1:
   dependencies:
     workbox-core "7.4.1"
 
-workbox-core@7.4.1:
+workbox-core@^7.4.1, workbox-core@7.4.1:
   version "7.4.1"
   resolved "https://registry.npmjs.org/workbox-core/-/workbox-core-7.4.1.tgz"
   integrity sha512-DT+vu46eh/2vRsSHTY4Xmc32Z1rr9PRlQUXr1Dx30ZuXRWwOsvZgGgcwxcasubQLQmbTNYZjv44LkBAQ4tT5tQ==
@@ -6668,7 +6668,7 @@ workbox-navigation-preload@7.4.1:
   dependencies:
     workbox-core "7.4.1"
 
-workbox-precaching@7.4.1:
+workbox-precaching@^7.4.1, workbox-precaching@7.4.1:
   version "7.4.1"
   resolved "https://registry.npmjs.org/workbox-precaching/-/workbox-precaching-7.4.1.tgz"
   integrity sha512-cdr/9qByww7yzEp7zg/qI4ukUrrNjQLgN+ONQRpjy/VqGQXwkgHwr00KksGJK8v0VifwDXBb8a4cWNZH71jn3Q==
@@ -6696,7 +6696,7 @@ workbox-recipes@7.4.1:
     workbox-routing "7.4.1"
     workbox-strategies "7.4.1"
 
-workbox-routing@7.4.1:
+workbox-routing@^7.4.1, workbox-routing@7.4.1:
   version "7.4.1"
   resolved "https://registry.npmjs.org/workbox-routing/-/workbox-routing-7.4.1.tgz"
   integrity sha512-yubJGErZOusuidAenaL5ypfhQOa7urxP/f8E0ws7FPb4039RiWXUWBAyUkmUoOL/BcQGen3h0J8872d51IYxtA==

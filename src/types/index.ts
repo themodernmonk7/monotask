@@ -90,6 +90,17 @@ export interface AppSettings {
   timerReminderMinutes: number;
   /** Defaults to 'dark' to preserve the app's original always-dark look. */
   theme: 'light' | 'dark';
+  /** IANA zone the reminder times are in; kept in step with the device. */
+  timezone: string;
+  /** Push "were you working while away?" when a timer runs unattended. */
+  idlePushEnabled: boolean;
+  /** Push one summary of open tasks at set times. */
+  pendingReminderEnabled: boolean;
+  /** 'HH:mm', first reminder of the day. */
+  pendingReminderStart: string;
+  pendingReminderIntervalMinutes: number;
+  /** Reminders per day, at most. */
+  pendingReminderCount: number;
 }
 
 export type TargetStatus = 'below' | 'completed' | 'overtime';
