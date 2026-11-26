@@ -203,6 +203,78 @@ REVOKE ALL ON FUNCTION public.get_shared_report(UUID) FROM public;
 GRANT EXECUTE ON FUNCTION public.get_shared_report(UUID) TO anon, authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 9. Multi-device safety
+--
+-- Several devices can be signed in to one account at once. These make the
+-- server, not whichever device wrote last, the guard of two facts.
+-- ---------------------------------------------------------------------------
+
+-- (a) A completed task is never open again. A device holding a stale copy of
+--     a group (a timer still running there, or an older app version) used to
+--     write the group back with the task in it, resurrecting a task completed
+--     elsewhere. Completions are recognised by the deterministic id
+--     ('done-' || task id) and, for older ones, through the sessions
+--     attributed to them. SECURITY INVOKER: RLS still applies.
+CREATE INDEX IF NOT EXISTS work_sessions_user_task_idx
+  ON public.work_sessions (user_id, task_id);
+
+CREATE OR REPLACE FUNCTION public.strip_completed_tasks()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.tasks IS NULL OR jsonb_typeof(NEW.tasks) <> 'array' THEN
+    RETURN NEW;
+  END IF;
+
+  NEW.tasks := coalesce((
+    SELECT jsonb_agg(e.t ORDER BY e.ord)
+    FROM jsonb_array_elements(NEW.tasks) WITH ORDINALITY AS e(t, ord)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM public.completed_tasks c
+      WHERE c.user_id = NEW.user_id
+        AND (
+          c.id = 'done-' || (e.t->>'id')
+          OR c.id IN (
+            SELECT w.completed_task_id FROM public.work_sessions w
+            WHERE w.user_id = NEW.user_id
+              AND w.task_id = e.t->>'id'
+              AND w.completed_task_id IS NOT NULL
+          )
+        )
+    )
+  ), '[]'::jsonb);
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS groups_strip_completed_tasks ON public.groups;
+CREATE TRIGGER groups_strip_completed_tasks
+  BEFORE INSERT OR UPDATE OF tasks ON public.groups
+  FOR EACH ROW EXECUTE FUNCTION public.strip_completed_tasks();
+
+-- (b) Devices hear about each other's changes: add the app's tables to the
+--     realtime feed (RLS still decides who receives what).
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    FOREACH t IN ARRAY ARRAY['groups', 'completed_tasks', 'work_sessions', 'note_groups',
+                             'tags', 'user_settings', 'user_active_state'] LOOP
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+      ) THEN
+        EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+      END IF;
+    END LOOP;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Migrations for databases created before a column existed. Safe to re-run.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;

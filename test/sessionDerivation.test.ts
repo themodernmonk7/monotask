@@ -87,8 +87,15 @@ describe('deriveAllSessions', () => {
     assert.equal(total(list), 1800);
   });
 
-  test('accounts for elapsed time beyond what sessions record', () => {
-    const groups = [group('g1', 'Core', [{ id: 't1', name: 'Work', elapsedSeconds: 5400 }])];
+  test('counts pre-session base time once, at its fixed moment — not "now"', () => {
+    // Regression: unrecorded time used to be dated `now`, so the same hours
+    // landed on every day until the task was completed.
+    const migratedAt = NOW - 3 * 24 * 3600_000; // three days ago
+    const groups = [
+      group('g1', 'Core', [
+        { id: 't1', name: 'Work', elapsedSeconds: 0, baseSeconds: 1800, baseAt: migratedAt },
+      ]),
+    ];
 
     const list = deriveAllSessions({
       sessions: [session({ durationSeconds: 3600 })],
@@ -102,7 +109,38 @@ describe('deriveAllSessions', () => {
     const accum = list.find((s) => s.id === 'task-accum-t1');
     assert.ok(accum, 'expected an accumulation slice');
     assert.equal(accum.durationSeconds, 1800);
-    assert.equal(total(list), 5400, 'total must equal the task elapsed');
+    assert.equal(accum.endTime, migratedAt);
+    assert.equal(total(list), 5400);
+  });
+
+  test('the stored elapsedSeconds counter is never trusted for reports', () => {
+    // A stale device can write any number there; only sessions + base count.
+    const groups = [
+      group('g1', 'Core', [{ id: 't1', name: 'Work', elapsedSeconds: 99_999, baseSeconds: 0 }]),
+    ];
+    const list = deriveAllSessions({
+      sessions: [session({ durationSeconds: 3600 })],
+      completedTasks: [],
+      groups,
+      runningTaskId: null,
+      activeSession: null,
+      now: NOW,
+    });
+    assert.equal(total(list), 3600);
+  });
+
+  test('an unanswered idle prompt stops the live segment where the user left', () => {
+    const groups = [group('g1', 'Core', [{ id: 't1', name: 'Work', elapsedSeconds: 0, baseSeconds: 0 }])];
+    const list = deriveAllSessions({
+      sessions: [],
+      completedTasks: [],
+      groups,
+      runningTaskId: 't1',
+      activeSession: { taskId: 't1', startTime: NOW - 10 * 3600_000 },
+      now: NOW,
+      liveEnd: NOW - 9 * 3600_000, // left after 1h, came back 9h later
+    });
+    assert.equal(total(list), 3600);
   });
 
   test('emits no accumulation slice when sessions already cover elapsed', () => {
@@ -200,7 +238,7 @@ describe('deriveAllSessions', () => {
 
   test('carries the ticket id through every synthesised kind', () => {
     const groups = [
-      group('g1', 'Core', [{ id: 't1', name: '[PROJ-7] Work', elapsedSeconds: 600 }]),
+      group('g1', 'Core', [{ id: 't1', name: '[PROJ-7] Work', elapsedSeconds: 0, baseSeconds: 600 }]),
     ];
     const list = deriveAllSessions({
       sessions: [],

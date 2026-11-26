@@ -13,6 +13,12 @@ export interface DeriveSessionsInput {
   runningTaskId: string | null;
   activeSession: ActiveSessionRef | null;
   now: number;
+  /**
+   * Where the live segment stops. Normally `now`; while the user hasn't yet
+   * answered "were you working while away?", it stops where they left, so
+   * unconfirmed time is never shown as worked.
+   */
+  liveEnd?: number;
 }
 
 /**
@@ -24,12 +30,12 @@ export interface DeriveSessionsInput {
  * synthesised kinds are:
  *
  *   1. legacy-*      — a completed task with no session covering it.
- *   2. task-accum-*  — elapsed time on an open task beyond what its sessions
- *                      account for (e.g. the timer ran before sessions existed).
+ *   2. task-accum-*  — an open task's baseSeconds: time from before sessions
+ *                      existed. Placed at baseAt, a fixed moment — dating it
+ *                      "now" put the same hours on every day until the task
+ *                      was completed.
  *   3. active-live-* — the segment currently being timed.
  *
- * The subtle part is (2): it subtracts the live segment as well as recorded
- * sessions, otherwise the time currently being timed would be counted twice.
  */
 export function deriveAllSessions({
   sessions,
@@ -38,6 +44,7 @@ export function deriveAllSessions({
   runningTaskId,
   activeSession,
   now,
+  liveEnd = now,
 }: DeriveSessionsInput): WorkSession[] {
   const list: WorkSession[] = [...sessions];
 
@@ -80,38 +87,22 @@ export function deriveAllSessions({
     });
   }
 
-  // 2. Elapsed time on open tasks not yet covered by a session
-  const sessionSecondsByTaskId = new Map<string, number>();
-  for (const s of sessions) {
-    sessionSecondsByTaskId.set(
-      s.taskId,
-      (sessionSecondsByTaskId.get(s.taskId) || 0) + s.durationSeconds,
-    );
-  }
-
+  // 2. Pre-session time on open tasks
   for (const group of groups) {
     for (const task of group.tasks) {
-      const recordedSeconds = sessionSecondsByTaskId.get(task.id) || 0;
-      const activeNowSeconds =
-        runningTaskId === task.id && activeSession
-          ? Math.max(0, Math.floor((now - activeSession.startTime) / 1000))
-          : 0;
-
-      const unrecordedSeconds =
-        task.elapsedSeconds - recordedSeconds - activeNowSeconds;
-
-      if (unrecordedSeconds > 0) {
-        list.push({
-          id: `task-accum-${task.id}`,
-          taskId: task.id,
-          taskName: task.name,
-          groupName: group.name,
-          ticketId: extractTicketId(task.name) || undefined,
-          startTime: now - unrecordedSeconds * 1000,
-          endTime: now,
-          durationSeconds: unrecordedSeconds,
-        });
-      }
+      const base = task.baseSeconds ?? 0;
+      if (base <= 0) continue;
+      const end = task.baseAt ?? now;
+      list.push({
+        id: `task-accum-${task.id}`,
+        taskId: task.id,
+        taskName: task.name,
+        groupName: group.name,
+        ticketId: extractTicketId(task.name) || undefined,
+        startTime: end - base * 1000,
+        endTime: end,
+        durationSeconds: base,
+      });
     }
   }
 
@@ -119,7 +110,7 @@ export function deriveAllSessions({
   if (runningTaskId && activeSession) {
     const activeDuration = Math.max(
       0,
-      Math.floor((now - activeSession.startTime) / 1000),
+      Math.floor((liveEnd - activeSession.startTime) / 1000),
     );
 
     if (activeDuration > 0) {
@@ -136,7 +127,7 @@ export function deriveAllSessions({
           groupName: group.name,
           ticketId: extractTicketId(task.name) || undefined,
           startTime: activeSession.startTime,
-          endTime: now,
+          endTime: Math.max(activeSession.startTime, liveEnd),
           durationSeconds: activeDuration,
         });
       }

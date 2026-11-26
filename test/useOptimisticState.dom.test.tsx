@@ -46,9 +46,9 @@ describe('useOptimisticState', () => {
     );
     const { view } = setup(write);
 
-    act(() => view.result.current.commit(() => [{ id: 'a' }]));
+    await act(async () => { void view.result.current.commit(() => [{ id: 'a' }]); });
 
-    // Painted without waiting for the network.
+    // Painted without waiting for the network (the write is still pending).
     expect(view.result.current.value).toEqual([{ id: 'a' }]);
     expect(write).toHaveBeenCalledTimes(1);
 
@@ -80,8 +80,8 @@ describe('useOptimisticState', () => {
 
     const { view, onError } = setup(write);
 
-    act(() => view.result.current.commit(() => [{ id: 'first' }]));
-    act(() => view.result.current.commit(() => [{ id: 'second' }]));
+    await act(async () => { void view.result.current.commit(() => [{ id: 'first' }]); });
+    await act(async () => { void view.result.current.commit(() => [{ id: 'second' }]); });
 
     // The first write now fails, after the second edit already landed.
     await act(async () => { failFirst({ error: 'rejected by server' }); });
@@ -126,13 +126,13 @@ describe('useOptimisticState', () => {
     const write = vi.fn(ok);
     const { view } = setup(write, { userId: 'u1', ready: false });
 
-    act(() => view.result.current.commit(() => [{ id: 'a' }]));
+    await act(async () => { void view.result.current.commit(() => [{ id: 'a' }]); });
 
     expect(view.result.current.value).toEqual([{ id: 'a' }], );
     expect(write).not.toHaveBeenCalled(); // local only, nothing sent
   });
 
-  test('set() never persists — it is for hydration and timer ticks', () => {
+  test('set() never persists — it is for hydration and timer ticks', async () => {
     const write = vi.fn(ok);
     const { view } = setup(write);
 
@@ -142,11 +142,11 @@ describe('useOptimisticState', () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  test('an identical commit is skipped entirely', () => {
+  test('an identical commit is skipped entirely', async () => {
     const write = vi.fn(ok);
     const { view } = setup(write);
 
-    act(() => view.result.current.commit((prev) => prev));
+    await act(async () => { void view.result.current.commit((prev) => prev); });
 
     expect(write).not.toHaveBeenCalled();
   });
@@ -156,9 +156,9 @@ describe('useOptimisticState', () => {
     const { view } = setup(write);
 
     act(() => view.result.current.set([{ id: 'ticked' }]));
-    await act(async () => { view.result.current.flush(); });
+    await act(async () => { await view.result.current.flush(); });
 
-    expect(write).toHaveBeenCalledWith('u1', [{ id: 'ticked' }]);
+    expect(write).toHaveBeenCalledWith('u1', [{ id: 'ticked' }], null);
   });
 
   test('reports a write attempt before it is sent, not after it fails', async () => {
@@ -169,26 +169,63 @@ describe('useOptimisticState', () => {
     const write = vi.fn(() => new Promise<PersistResult>((r) => { release = r; }));
     const { view, onWriteAttempt } = setup(write);
 
-    act(() => view.result.current.commit(() => [{ id: 'a' }]));
+    await act(async () => { void view.result.current.commit(() => [{ id: 'a' }]); });
 
     expect(onWriteAttempt).toHaveBeenCalledTimes(1);
     await act(async () => { release({ error: null }); });
   });
 
-  test('a skipped write reports no attempt', () => {
+  test('a skipped write reports no attempt', async () => {
     const write = vi.fn(ok);
     const { view, onWriteAttempt } = setup(write, { userId: 'u1', ready: false });
 
-    act(() => view.result.current.commit(() => [{ id: 'a' }]));
+    await act(async () => { void view.result.current.commit(() => [{ id: 'a' }]); });
 
     expect(onWriteAttempt).not.toHaveBeenCalled();
   });
 
-  test('ref always holds the current value for stale-closure-free reads', () => {
+  test('ref always holds the current value for stale-closure-free reads', async () => {
     const write = vi.fn(ok);
     const { view } = setup(write);
 
-    act(() => view.result.current.commit(() => [{ id: 'x' }]));
+    await act(async () => { void view.result.current.commit(() => [{ id: 'x' }]); });
     expect(view.result.current.ref.current).toEqual([{ id: 'x' }]);
+  });
+
+  test('writes for one slice run strictly in order, never overlapping', async () => {
+    // The regression this guards: two requests racing at the server, the
+    // older one landing last and undoing the newer one.
+    const releases: Array<(v: PersistResult) => void> = [];
+    const write = vi.fn(() => new Promise<PersistResult>((r) => { releases.push(r); }));
+    const { view } = setup(write);
+
+    await act(async () => { void view.result.current.commit(() => [{ id: 'a' }]); });
+    await act(async () => { void view.result.current.commit(() => [{ id: 'a' }, { id: 'b' }]); });
+    expect(write).toHaveBeenCalledTimes(1); // second waits for the first
+
+    await act(async () => { releases[0]({ error: null }); });
+    expect(write).toHaveBeenCalledTimes(2);
+    await act(async () => { releases[1]({ error: null }); });
+  });
+
+  test('each write is diffed against what the server last confirmed', async () => {
+    const write = vi.fn(ok);
+    const { view } = setup(write);
+
+    act(() => view.result.current.hydrate([{ id: 'server' }], true));
+    await act(async () => { await view.result.current.commit((p) => [...p, { id: 'mine' }]); });
+    expect(write).toHaveBeenLastCalledWith('u1', [{ id: 'server' }, { id: 'mine' }], [{ id: 'server' }]);
+
+    await act(async () => { await view.result.current.commit(() => [{ id: 'mine' }]); });
+    expect(write).toHaveBeenLastCalledWith('u1', [{ id: 'mine' }], [{ id: 'server' }, { id: 'mine' }]);
+  });
+
+  test('an untrusted (cached) hydrate leaves no baseline, so nothing is ever deleted', async () => {
+    const write = vi.fn(ok);
+    const { view } = setup(write);
+
+    act(() => view.result.current.hydrate([{ id: 'cached' }], false));
+    await act(async () => { await view.result.current.commit(() => [{ id: 'edited' }]); });
+    expect(write).toHaveBeenLastCalledWith('u1', [{ id: 'edited' }], null);
   });
 });

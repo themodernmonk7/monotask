@@ -227,6 +227,49 @@ export async function mockSupabase(page: Page, seed: SeedData = defaultSeed()) {
       return;
     }
 
+    // PostgREST-style `col=eq.value` / `col=in.(a,b)` filters, enough for
+    // the app's conditional updates and targeted deletes.
+    const matches = (row: Record<string, unknown>) => {
+      for (const [col, expr] of url.searchParams) {
+        if (col === 'select' || col === 'on_conflict') continue;
+        const value = String(row[col] ?? '');
+        if (expr.startsWith('eq.') && value !== expr.slice(3)) return false;
+        if (expr.startsWith('in.(')) {
+          const list = expr
+            .slice(4, -1)
+            .split(',')
+            .map((v) => v.replace(/^"|"$/g, ''));
+          if (!list.includes(value)) return false;
+        }
+      }
+      return true;
+    };
+
+    if (method === 'DELETE') {
+      const rows = state.seed[table as keyof SeedData];
+      if (Array.isArray(rows)) {
+        (state.seed as Record<string, unknown>)[table] = rows.filter(
+          (r) => !matches(r as Record<string, unknown>),
+        );
+      }
+      await json(route, []);
+      return;
+    }
+
+    if (method === 'PATCH' && body) {
+      const rows = state.seed[table as keyof SeedData];
+      const patch = body as Record<string, unknown>;
+      if (Array.isArray(rows)) {
+        (state.seed as Record<string, unknown>)[table] = rows.map((r) =>
+          matches(r as Record<string, unknown>) ? { ...(r as object), ...patch } : r,
+        );
+      } else if (rows && matches(rows as Record<string, unknown>)) {
+        (state.seed as Record<string, unknown>)[table] = { ...(rows as object), ...patch };
+      }
+      await json(route, []);
+      return;
+    }
+
     if (method === 'POST' && body) {
       const incoming = (Array.isArray(body) ? body : [body]) as { id?: string }[];
       const existing = state.seed[table as keyof SeedData];

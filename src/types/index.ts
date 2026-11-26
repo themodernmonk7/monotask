@@ -24,7 +24,16 @@ export interface Tag {
 export interface Task {
   id: string;
   name: string;
+  /**
+   * In the UI: the task's derived total (see lib/timeModel.ts). In storage:
+   * kept only so older app versions still read something sensible — current
+   * code never trusts the stored value except to migrate it once.
+   */
   elapsedSeconds: number;
+  /** Time that predates recorded sessions. Fixed once migrated. */
+  baseSeconds?: number;
+  /** When baseSeconds was migrated, so reports place it on one day, not "today" forever. */
+  baseAt?: number;
   description?: string;
   tagIds?: string[];
   /**

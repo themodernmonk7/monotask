@@ -7,6 +7,7 @@ import {
   moveTaskBetweenGroups,
   pinnedFirst,
   removeTagFromTasks,
+  retimeCompletedTaskSessions,
   setGroupColor,
   toggleGroupPinned,
 } from '../src/lib/taskMutations';
@@ -219,5 +220,49 @@ describe('setGroupColor', () => {
   test('no-ops for an unknown group', () => {
     const input = [g('a')];
     assert.equal(setGroupColor(input, 'ghost', 'red'), input);
+  });
+});
+
+describe('retimeCompletedTaskSessions', () => {
+  const H = 3600_000;
+  const T0 = new Date(2026, 10, 26, 10, 0, 0).getTime();
+  const s = (id: string, startH: number, mins: number, completedTaskId = 'c1'): WorkSession => ({
+    id,
+    taskId: 't1',
+    taskName: 'Customer screen',
+    groupName: 'Core',
+    startTime: T0 + startH * H,
+    endTime: T0 + startH * H + mins * 60_000,
+    durationSeconds: mins * 60,
+    completedTaskId,
+  });
+  const sum = (list: WorkSession[], id = 'c1') =>
+    list.filter((x) => x.completedTaskId === id).reduce((a, x) => a + x.durationSeconds, 0);
+
+  test('regression: editing the total never multiplies it by the session count', () => {
+    const before = [s('a', 0, 40), s('b', 1, 30), s('c', 3, 60)];
+    const after = retimeCompletedTaskSessions(before, 'c1', 5571);
+    assert.equal(sum(after), 5571); // was 3 × 5571 before the fix
+    for (const x of after) assert.equal(x.endTime - x.startTime, x.durationSeconds * 1000);
+  });
+
+  test('raising the total extends only the latest session', () => {
+    const after = retimeCompletedTaskSessions([s('a', 0, 40), s('c', 3, 60)], 'c1', 120 * 60);
+    assert.equal(after.find((x) => x.id === 'a')!.durationSeconds, 40 * 60);
+    assert.equal(after.find((x) => x.id === 'c')!.durationSeconds, 80 * 60);
+  });
+
+  test('cutting the total trims from the latest backwards and drops emptied sessions', () => {
+    const after = retimeCompletedTaskSessions([s('a', 0, 40), s('b', 1, 30), s('c', 3, 60)], 'c1', 50 * 60);
+    assert.deepEqual(after.map((x) => [x.id, x.durationSeconds / 60]), [['a', 40], ['b', 10]]);
+  });
+
+  test('other tasks are untouched and a no-op returns the same array', () => {
+    const other = s('z', 2, 15, 'c2');
+    const before = [s('a', 0, 40), other];
+    assert.equal(retimeCompletedTaskSessions(before, 'c1', 40 * 60), before);
+    const after = retimeCompletedTaskSessions(before, 'c1', 10 * 60);
+    assert.equal(after.find((x) => x.id === 'z'), other);
+    assert.equal(retimeCompletedTaskSessions(before, 'missing', 99), before);
   });
 });

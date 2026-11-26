@@ -10,7 +10,16 @@ export interface PersistGate {
   ready: boolean;
 }
 
-export type Writer<T> = (userId: string, value: T) => Promise<PersistResult>;
+/**
+ * Persist `next`. `prev` is the last value the server is known to hold for
+ * this slice (or null when that is unknown, e.g. after starting from the
+ * offline cache), so a writer can send only what changed.
+ */
+export type Writer<T> = (
+  userId: string,
+  next: T,
+  prev: T | null,
+) => Promise<PersistResult>;
 
 export interface OptimisticOptions {
   gateRef: RefObject<PersistGate>;
@@ -25,18 +34,29 @@ export interface OptimisticOptions {
    * and the refetch it then performs overwrites the edit.
    */
   onWriteAttemptRef?: RefObject<(() => void) | null>;
+  /**
+   * Shared count of writes currently in flight across every slice. A refetch
+   * must wait for it to reach zero, or the server's not-yet-updated rows would
+   * overwrite an edit that is still on its way.
+   */
+  inflightRef?: RefObject<number>;
 }
 
 export interface OptimisticState<T> {
   value: T;
   /** Always current, unlike `value` inside a stale closure. */
   ref: RefObject<T>;
-  /** Apply locally without persisting — for server hydration and timer ticks. */
+  /** Apply locally without persisting (derived or purely local state). */
   set: (next: T | ((prev: T) => T)) => void;
+  /**
+   * Replace local state with what the server (trusted) or the offline cache
+   * (untrusted) holds, and make it the baseline later writes diff against.
+   */
+  hydrate: (value: T, trusted: boolean) => void;
   /** Apply locally, persist, and roll back if the write is rejected. */
-  commit: (updater: (prev: T) => T) => void;
+  commit: (updater: (prev: T) => T) => Promise<void>;
   /** Persist whatever is in state right now (no rollback target). */
-  flush: () => void;
+  flush: () => Promise<void>;
 }
 
 /**
@@ -48,16 +68,23 @@ export interface OptimisticState<T> {
  *    clobber work done after the failed edit.
  *  - transient failure (offline, flaky link) -> keep the optimistic value and
  *    hand the write to the retry queue.
+ *
+ * Writes for one slice run strictly one after another and each sends only the
+ * difference from the last value the server confirmed. Run concurrently, an
+ * older request could land after a newer one and undo it on the server.
  */
 export function useOptimisticState<T>(
   key: string,
   initial: T,
   write: Writer<T>,
-  { gateRef, onErrorRef, queueRef, onWriteAttemptRef }: OptimisticOptions,
+  { gateRef, onErrorRef, queueRef, onWriteAttemptRef, inflightRef }: OptimisticOptions,
 ): OptimisticState<T> {
   const [value, setValue] = useState<T>(initial);
   const ref = useRef<T>(initial);
   const revRef = useRef(0);
+  /** What the server is known to hold; null = unknown, so never delete. */
+  const syncedRef = useRef<T | null>(null);
+  const chainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const apply = useCallback((next: T) => {
     ref.current = next;
@@ -75,33 +102,54 @@ export function useOptimisticState<T>(
     [apply],
   );
 
+  const hydrate = useCallback(
+    (next: T, trusted: boolean) => {
+      apply(next);
+      syncedRef.current = trusted ? next : null;
+    },
+    [apply],
+  );
+
+  /** Send the newest value, after any write already in flight for this slice. */
+  const runWrite = useCallback((): Promise<PersistResult> => {
+    if (inflightRef) inflightRef.current += 1;
+    const run = chainRef.current.then(async (): Promise<PersistResult> => {
+      const gate = gateRef.current;
+      if (!gate?.userId || !gate.ready) return { error: null };
+      const snapshot = ref.current;
+      if (snapshot === syncedRef.current) return { error: null };
+      const result = await write(gate.userId, snapshot, syncedRef.current);
+      if (!result.error) syncedRef.current = snapshot;
+      return result;
+    });
+    const settled = run.catch((err: unknown) => ({
+      error: err instanceof Error ? err.message : String(err),
+    }));
+    chainRef.current = settled;
+    return settled.finally(() => {
+      if (inflightRef) inflightRef.current -= 1;
+    });
+  }, [gateRef, inflightRef, write]);
+
   /** Retries always send the newest value, never the one that failed. */
   const queueLatest = useCallback(() => {
-    const queue = queueRef.current;
-    if (!queue) return;
-    queue.enqueue(key, () => {
-      const gate = gateRef.current;
-      if (!gate?.userId || !gate.ready) {
-        return Promise.resolve({ error: null });
-      }
-      return write(gate.userId, ref.current);
-    });
-  }, [gateRef, key, queueRef, write]);
+    queueRef.current?.enqueue(key, runWrite);
+  }, [key, queueRef, runWrite]);
 
   const commit = useCallback(
-    (updater: (prev: T) => T) => {
+    (updater: (prev: T) => T): Promise<void> => {
       const prev = ref.current;
       const next = updater(prev);
-      if (next === prev) return;
+      if (next === prev) return Promise.resolve();
 
       const rev = apply(next);
 
       const gate = gateRef.current;
-      if (!gate?.userId || !gate.ready) return;
+      if (!gate?.userId || !gate.ready) return Promise.resolve();
 
       onWriteAttemptRef?.current?.();
 
-      write(gate.userId, next).then(({ error }) => {
+      return runWrite().then(({ error }) => {
         if (!error) return;
 
         if (isTransientError(error)) {
@@ -115,16 +163,16 @@ export function useOptimisticState<T>(
         setValue(prev);
       });
     },
-    [apply, gateRef, onErrorRef, onWriteAttemptRef, queueLatest, write],
+    [apply, gateRef, onErrorRef, onWriteAttemptRef, queueLatest, runWrite],
   );
 
-  const flush = useCallback(() => {
+  const flush = useCallback((): Promise<void> => {
     const gate = gateRef.current;
-    if (!gate?.userId || !gate.ready) return;
+    if (!gate?.userId || !gate.ready) return Promise.resolve();
 
     onWriteAttemptRef?.current?.();
 
-    write(gate.userId, ref.current).then(({ error }) => {
+    return runWrite().then(({ error }) => {
       if (!error) return;
       if (isTransientError(error)) {
         queueLatest();
@@ -132,7 +180,7 @@ export function useOptimisticState<T>(
       }
       onErrorRef.current?.(error);
     });
-  }, [gateRef, onErrorRef, onWriteAttemptRef, queueLatest, write]);
+  }, [gateRef, onErrorRef, onWriteAttemptRef, queueLatest, runWrite]);
 
-  return { value, ref, set, commit, flush };
+  return { value, ref, set, hydrate, commit, flush };
 }
