@@ -49,6 +49,7 @@ import { UndoToast } from "./components/UndoToast"
 import { IdleDialog } from "./components/IdleDialog"
 import { LogTimeDialog } from "./components/LogTimeDialog"
 import { deviceTimezone, refreshPushSubscription } from "./lib/push"
+import { useAppBadge } from "./hooks/useAppBadge"
 
 type TabId = "tasks" | "completed" | "reports" | "notes"
 
@@ -243,6 +244,9 @@ function AppContent() {
     runningTask?.elapsedSeconds ?? 0,
     Boolean(runningTaskId),
   )
+
+  // Running minutes on the installed app's Dock / taskbar icon.
+  useAppBadge(runningTask?.elapsedSeconds ?? 0, Boolean(runningTaskId))
 
   // Push reminders run on the server, which needs to know this device's
   // subscription (browsers rotate them) and the user's time zone. The zone is

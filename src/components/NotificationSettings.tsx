@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BellRing, Smartphone, Send } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
   Select,
@@ -27,13 +28,6 @@ export interface NotificationDraft {
   pendingReminderCount: number;
 }
 
-const TIMES = Array.from({ length: 48 }, (_, i) => {
-  const h = Math.floor(i / 2);
-  const m = i % 2 ? '30' : '00';
-  const value = `${String(h).padStart(2, '0')}:${m}`;
-  const label = `${h % 12 === 0 ? 12 : h % 12}:${m} ${h < 12 ? 'AM' : 'PM'}`;
-  return { value, label };
-});
 const INTERVALS = [15, 30, 45, 60, 90, 120];
 const COUNTS = [1, 2, 3, 4, 5, 6, 8, 10];
 
@@ -184,21 +178,19 @@ export function NotificationSettings({
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
               <span className="text-[11px] text-muted-foreground">Starting at</span>
-              <Select
+              <Input
+                type="time"
+                aria-label="First reminder time"
                 value={draft.pendingReminderStart}
-                onValueChange={(v) => onChange({ pendingReminderStart: v })}
-              >
-                <SelectTrigger aria-label="First reminder time" className={triggerClass}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="max-h-64">
-                  {TIMES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                // Any minute of the day. A cleared field keeps the last valid
+                // time rather than saving an empty one.
+                onChange={(e) => {
+                  if (/^\d{2}:\d{2}$/.test(e.target.value)) {
+                    onChange({ pendingReminderStart: e.target.value });
+                  }
+                }}
+                className="h-8 text-xs bg-muted/30 border-foreground/10"
+              />
             </div>
             <div className="space-y-1">
               <span className="text-[11px] text-muted-foreground">Every</span>
